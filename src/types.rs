@@ -32,7 +32,7 @@ pub enum ErrorCorrection {
     H, // High (~30%)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum DataMode {
     Numeric,
     Alphanumeric,

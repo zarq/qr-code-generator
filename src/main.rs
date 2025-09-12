@@ -4,7 +4,7 @@ use std::env;
 mod types;
 mod mask;
 mod encoding;
-use types::{Version, ErrorCorrection, MaskPattern};
+use types::{Version, ErrorCorrection, MaskPattern, DataMode};
 use mask::apply_mask;
 use encoding::{encode_data, EncodedData};
 
@@ -188,12 +188,17 @@ fn apply_format_mask(matrix: &mut Vec<Vec<u8>>) {
     }
 }
 
-fn generate_qr_matrix(url: &str, version: Version, mask_pattern: MaskPattern, skip_mask: bool) -> Vec<Vec<u8>> {
+fn add_dark_module(matrix: &mut Vec<Vec<u8>>, version: Version) {
+    let size = version.size();
+    matrix[(4 * version as usize) + 13][8] = 1;
+}
+
+fn generate_qr_matrix(url: &str, version: Version, mask_pattern: MaskPattern, skip_mask: bool, data_mode: DataMode) -> Vec<Vec<u8>> {
     let size = version.size();
     let mut matrix = vec![vec![0u8; size]; size];
     
     // Encode the data
-    let encoded = encode_data(url, version, ErrorCorrection::H);
+    let encoded = encode_data(url, version, ErrorCorrection::H, data_mode);
     
     // Place the encoded data
     place_data_bits(&mut matrix, &encoded);
@@ -213,6 +218,7 @@ fn generate_qr_matrix(url: &str, version: Version, mask_pattern: MaskPattern, sk
     add_timing_patterns(&mut matrix, size);
     add_format_info(&mut matrix, ErrorCorrection::H, mask_pattern);
     apply_format_mask(&mut matrix);
+    add_dark_module(&mut matrix, version);
     
     matrix
 }
@@ -237,8 +243,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     
     if args.len() < 3 {
-        eprintln!("Usage: {} <output_file.png> <url> [mask_pattern] [--skip-mask|-s]", args[0]);
-        eprintln!("mask_pattern: 0-7 (default: 0)");
+        eprintln!("Usage: {} <output_file.png> <url> [options]", args[0]);
+        eprintln!("Options:");
+        eprintln!("  [mask_pattern]     0-7 (default: 0)");
+        eprintln!("  --skip-mask, -s    Skip mask application");
+        eprintln!("  --byte-mode, -b    Use byte mode encoding (default)");
+        eprintln!("  --alphanumeric-mode, -a  Use alphanumeric mode encoding");
         std::process::exit(1);
     }
     
@@ -247,31 +257,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let mut mask_pattern = MaskPattern::default();
     let mut skip_mask = false;
+    let mut data_mode = DataMode::Byte; // Default to byte mode
     
     // Parse remaining arguments
     for arg in &args[3..] {
-        if arg == "--skip-mask" || arg == "-s" {
-            skip_mask = true;
-        } else if let Ok(pattern) = arg.parse::<u8>() {
-            mask_pattern = match pattern {
-                0 => MaskPattern::Pattern0,
-                1 => MaskPattern::Pattern1,
-                n if n <= 7 => MaskPattern::Pattern0, // Default for unimplemented patterns
-                _ => {
-                    eprintln!("Invalid mask pattern. Use 0-7.");
+        match arg.as_str() {
+            "--skip-mask" | "-s" => skip_mask = true,
+            "--byte-mode" | "-b" => data_mode = DataMode::Byte,
+            "--alphanumeric-mode" | "-a" => data_mode = DataMode::Alphanumeric,
+            _ => {
+                if let Ok(pattern) = arg.parse::<u8>() {
+                    mask_pattern = match pattern {
+                        0 => MaskPattern::Pattern0,
+                        1 => MaskPattern::Pattern1,
+                        n if n <= 7 => MaskPattern::Pattern0, // Default for unimplemented patterns
+                        _ => {
+                            eprintln!("Invalid mask pattern. Use 0-7.");
+                            std::process::exit(1);
+                        }
+                    };
+                } else {
+                    eprintln!("Unknown argument: {}", arg);
                     std::process::exit(1);
                 }
-            };
-        } else {
-            eprintln!("Unknown argument: {}", arg);
-            std::process::exit(1);
+            }
         }
     }
     
-    let matrix = generate_qr_matrix(url, Version::V3, mask_pattern, skip_mask);
+    let matrix = generate_qr_matrix(url, Version::V3, mask_pattern, skip_mask, data_mode);
     matrix_to_png(&matrix, filename)?;
     
     let mask_status = if skip_mask { "skipped" } else { "applied" };
-    println!("QR code saved to {} with mask pattern {:?} ({})", filename, mask_pattern, mask_status);
+    println!("QR code saved to {} with mask pattern {:?} ({}) using {:?} mode", 
+             filename, mask_pattern, mask_status, data_mode);
     Ok(())
 }

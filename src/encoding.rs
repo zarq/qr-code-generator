@@ -5,14 +5,40 @@ pub struct EncodedData {
     pub ecc_bits: Vec<u8>,
 }
 
-pub fn encode_data(url: &str, version: Version, error_correction: ErrorCorrection) -> EncodedData {
-    let data_bits = encode_alphanumeric(url, version);
+pub fn encode_data(url: &str, version: Version, error_correction: ErrorCorrection, mode: DataMode) -> EncodedData {
+    let data_bits = match mode {
+        DataMode::Byte => encode_byte(url, version),
+        DataMode::Alphanumeric => encode_alphanumeric(url, version),
+        _ => encode_byte(url, version), // Default to byte mode
+    };
     let ecc_bits = generate_ecc(&data_bits, version, error_correction);
     
     EncodedData { data_bits, ecc_bits }
 }
 
-fn encode_alphanumeric(url: &str, version: Version) -> Vec<u8> {
+fn encode_byte(url: &str, _version: Version) -> Vec<u8> {
+    let mut bits = Vec::new();
+    
+    // Mode indicator (4 bits) - Byte = 0100
+    bits.extend_from_slice(&[0, 1, 0, 0]);
+    
+    // Character count (8 bits for Version 3)
+    let count = url.len();
+    for i in (0..8).rev() {
+        bits.push(((count >> i) & 1) as u8);
+    }
+    
+    // Encode each byte
+    for byte in url.bytes() {
+        for i in (0..8).rev() {
+            bits.push(((byte >> i) & 1) as u8);
+        }
+    }
+    
+    bits
+}
+
+fn encode_alphanumeric(url: &str, _version: Version) -> Vec<u8> {
     let mut bits = Vec::new();
     
     // Mode indicator (4 bits) - Alphanumeric = 0010
@@ -55,11 +81,8 @@ fn alphanumeric_value(c: char) -> u16 {
     }
 }
 
-fn generate_ecc(data_bits: &[u8], version: Version, error_correction: ErrorCorrection) -> Vec<u8> {
+fn generate_ecc(_data_bits: &[u8], _version: Version, _error_correction: ErrorCorrection) -> Vec<u8> {
     // Simplified ECC generation - just return zeros for now
-    let ecc_length = match (version, error_correction) {
-        (Version::V3, ErrorCorrection::H) => 136, // 17 bytes * 8 bits
-        _ => 136,
-    };
+    let ecc_length = 136; // 17 bytes * 8 bits for Version 3, Error Correction H
     vec![0; ecc_length]
 }
