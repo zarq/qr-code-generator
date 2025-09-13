@@ -69,6 +69,16 @@ run_test() {
     fi
 }
 
+# Enhanced validation function for specific values
+check_specific_value() {
+    local file=$1
+    local field=$2
+    local expected=$3
+    
+    local actual=$(jq -r ".$field" "$file" 2>/dev/null)
+    [ "$actual" = "$expected" ]
+}
+
 # Run tests
 echo "=== Basic Functionality Tests ==="
 
@@ -91,6 +101,51 @@ echo "=== Mask Pattern Tests ==="
 run_test "mask_0" "--numeric -u \"123456\" --mask-pattern 0" "mask pattern 0"
 run_test "mask_7" "--numeric -u \"123456\" --mask-pattern 7" "mask pattern 7"
 run_test "skip_mask" "--numeric -u \"123456\" --skip-mask" "skip mask"
+
+echo "=== Error Correction Validation Tests ==="
+
+# Test that different ECC levels produce different format info
+run_test "ecc_l_validation" "--numeric -u \"12345\" -l L" "ECC L validation"
+run_test "ecc_m_validation" "--numeric -u \"12345\" -l M" "ECC M validation"
+run_test "ecc_q_validation" "--numeric -u \"12345\" -l Q" "ECC Q validation"
+run_test "ecc_h_validation" "--numeric -u \"12345\" -l H" "ECC H validation"
+
+echo "=== Mask Pattern Validation Tests ==="
+
+# Test that different mask patterns produce different format info
+run_test "mask_validation_0" "--numeric -u \"123456\" --mask-pattern 0" "mask 0 validation"
+run_test "mask_validation_1" "--numeric -u \"123456\" --mask-pattern 1" "mask 1 validation"
+run_test "mask_validation_2" "--numeric -u \"123456\" --mask-pattern 2" "mask 2 validation"
+run_test "mask_validation_3" "--numeric -u \"123456\" --mask-pattern 3" "mask 3 validation"
+
+# Verify specific values are correctly set
+echo "=== Specific Value Verification ==="
+
+echo -n "Verifying ECC levels are correctly set... "
+if check_specific_value "tests/generated/ecc_l_validation.json" "error_correction" "L" && \
+   check_specific_value "tests/generated/ecc_m_validation.json" "error_correction" "M" && \
+   check_specific_value "tests/generated/ecc_q_validation.json" "error_correction" "Q" && \
+   check_specific_value "tests/generated/ecc_h_validation.json" "error_correction" "H"; then
+    echo -e "${GREEN}PASS${NC}"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    echo -e "${RED}FAIL${NC}"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+TESTS_RUN=$((TESTS_RUN + 1))
+
+echo -n "Verifying mask patterns are correctly set... "
+if check_specific_value "tests/generated/mask_validation_0.json" "mask_pattern" "Pattern0" && \
+   check_specific_value "tests/generated/mask_validation_1.json" "mask_pattern" "Pattern1" && \
+   check_specific_value "tests/generated/mask_validation_2.json" "mask_pattern" "Pattern2" && \
+   check_specific_value "tests/generated/mask_validation_3.json" "mask_pattern" "Pattern3"; then
+    echo -e "${GREEN}PASS${NC}"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    echo -e "${RED}FAIL${NC}"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+TESTS_RUN=$((TESTS_RUN + 1))
 
 echo "=== Numeric Encoding Tests ==="
 

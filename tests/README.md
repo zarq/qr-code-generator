@@ -26,11 +26,15 @@ Or directly:
 - V3+ (larger) generation
 
 ### Error Correction Tests
-- ECC levels L and M
+- ECC levels L, M, Q, and H
+- **ECC validation tests** - Verify correct ECC levels are applied
+- **Specific value verification** - Confirms ECC settings match expectations
 
 ### Mask Pattern Tests
-- Specific mask patterns (0, 7)
+- Specific mask patterns (0, 1, 2, 3, 7)
 - Skip mask functionality
+- **Mask validation tests** - Verify correct mask patterns are applied
+- **Specific value verification** - Confirms mask settings match expectations
 
 ### Numeric Encoding Tests
 - Single digit encoding

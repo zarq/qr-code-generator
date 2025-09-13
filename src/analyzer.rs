@@ -558,6 +558,22 @@ fn decode_format_info(format_value: u16) -> (Option<ErrorCorrection>, Option<Mas
         (0b100000011001110, ErrorCorrection::M, MaskPattern::Pattern5),
         (0b100111110010111, ErrorCorrection::M, MaskPattern::Pattern6),
         (0b100101010100000, ErrorCorrection::M, MaskPattern::Pattern7),
+        (0b011010101011111, ErrorCorrection::Q, MaskPattern::Pattern0),
+        (0b011000001101000, ErrorCorrection::Q, MaskPattern::Pattern1),
+        (0b011111100110001, ErrorCorrection::Q, MaskPattern::Pattern2),
+        (0b011101000000110, ErrorCorrection::Q, MaskPattern::Pattern3),
+        (0b010010010110100, ErrorCorrection::Q, MaskPattern::Pattern4),
+        (0b010000110000011, ErrorCorrection::Q, MaskPattern::Pattern5),
+        (0b010111011011010, ErrorCorrection::Q, MaskPattern::Pattern6),
+        (0b010101111101101, ErrorCorrection::Q, MaskPattern::Pattern7),
+        (0b001011010001001, ErrorCorrection::H, MaskPattern::Pattern0),
+        (0b001001110111110, ErrorCorrection::H, MaskPattern::Pattern1),
+        (0b001110011100111, ErrorCorrection::H, MaskPattern::Pattern2),
+        (0b001100111010000, ErrorCorrection::H, MaskPattern::Pattern3),
+        (0b000011101100010, ErrorCorrection::H, MaskPattern::Pattern4),
+        (0b000001001010101, ErrorCorrection::H, MaskPattern::Pattern5),
+        (0b000110100001100, ErrorCorrection::H, MaskPattern::Pattern6),
+        (0b000100000111011, ErrorCorrection::H, MaskPattern::Pattern7),
     ];
     
     for &(value, ecc, mask) in &format_map {
