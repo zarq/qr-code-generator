@@ -130,9 +130,11 @@ fn add_format_info(matrix: &mut Vec<Vec<u8>>, error_correction: ErrorCorrection,
     
     // Top-right and bottom-left format info
     let size = matrix.len();
-    for i in 0..7 {
+    for i in 0..8 {
         matrix[8][size - 1 - i] = ((format_info >> i) & 1) as u8;
-        matrix[size - 1 - i][8] = ((format_info >> (6 - i)) & 1) as u8;
+        if i < 7 {
+            matrix[size - 1 - i][8] = ((format_info >> (14 - i)) & 1) as u8;
+        }
     }
 }
 
