@@ -314,7 +314,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     match args[i + 1].parse::<u8>() {
                         Ok(0) => config.mask_pattern = MaskPattern::Pattern0,
                         Ok(1) => config.mask_pattern = MaskPattern::Pattern1,
-                        Ok(n) if n <= 7 => config.mask_pattern = MaskPattern::Pattern0, // Default for unimplemented
+                        Ok(2) => config.mask_pattern = MaskPattern::Pattern2,
+                        Ok(3) => config.mask_pattern = MaskPattern::Pattern3,
+                        Ok(4) => config.mask_pattern = MaskPattern::Pattern4,
+                        Ok(5) => config.mask_pattern = MaskPattern::Pattern5,
+                        Ok(6) => config.mask_pattern = MaskPattern::Pattern6,
+                        Ok(7) => config.mask_pattern = MaskPattern::Pattern7,
                         _ => {
                             eprintln!("Invalid mask pattern. Use 0-7.");
                             std::process::exit(1);
