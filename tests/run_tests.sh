@@ -69,6 +69,15 @@ run_test() {
     fi
 }
 
+# Enhanced validation function for extracted data
+check_extracted_data() {
+    local file=$1
+    local expected_data=$2
+    
+    local actual_data=$(jq -r '.data_analysis.extracted_data' "$file" 2>/dev/null)
+    [ "$actual_data" = "$expected_data" ]
+}
+
 # Enhanced validation function for specific values
 check_specific_value() {
     local file=$1
@@ -139,6 +148,45 @@ if check_specific_value "tests/generated/mask_validation_0.json" "mask_pattern" 
    check_specific_value "tests/generated/mask_validation_1.json" "mask_pattern" "Pattern1" && \
    check_specific_value "tests/generated/mask_validation_2.json" "mask_pattern" "Pattern2" && \
    check_specific_value "tests/generated/mask_validation_3.json" "mask_pattern" "Pattern3"; then
+    echo -e "${GREEN}PASS${NC}"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    echo -e "${RED}FAIL${NC}"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+TESTS_RUN=$((TESTS_RUN + 1))
+
+echo "=== Data Extraction Validation Tests ==="
+
+# Test that generated data matches extracted data
+run_test "data_extract_numeric" "--numeric -u \"42\" -o tests/generated/data_extract_numeric.png" "numeric data extraction"
+run_test "data_extract_byte" "--byte-mode -u \"Test123\" -o tests/generated/data_extract_byte.png" "byte data extraction"
+run_test "data_extract_long" "--numeric -u \"9876543210\" -o tests/generated/data_extract_long.png" "long numeric extraction"
+
+echo "=== Data Content Verification ==="
+
+echo -n "Verifying numeric data extraction... "
+if check_extracted_data "tests/generated/data_extract_numeric.json" "42"; then
+    echo -e "${GREEN}PASS${NC}"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    echo -e "${RED}FAIL${NC}"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+TESTS_RUN=$((TESTS_RUN + 1))
+
+echo -n "Verifying byte data extraction... "
+if check_extracted_data "tests/generated/data_extract_byte.json" "Test123"; then
+    echo -e "${GREEN}PASS${NC}"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    echo -e "${RED}FAIL${NC}"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+TESTS_RUN=$((TESTS_RUN + 1))
+
+echo -n "Verifying long numeric data extraction... "
+if check_extracted_data "tests/generated/data_extract_long.json" "9876543210"; then
     echo -e "${GREEN}PASS${NC}"
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else

@@ -502,7 +502,12 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
         _ => Some("Unknown".to_string()),
     };
     
-    let length_bits = if unmasked_bits.len() >= 12 { 8 } else { 4 };
+    let length_bits = match encoding_info.as_str() {
+        "0001" => 10, // Numeric mode in V1 uses 10 bits for length
+        "0010" => 9,  // Alphanumeric mode in V1 uses 9 bits
+        "0100" => 8,  // Byte mode in V1 uses 8 bits
+        _ => 8,
+    };
     let data_length = if unmasked_bits.len() >= 4 + length_bits {
         Some(bits_to_usize(&unmasked_bits[4..4+length_bits]))
     } else {
@@ -691,19 +696,25 @@ fn decode_numeric_bits(bits: &[u8]) -> Option<String> {
     
     while i + 10 <= bits.len() {
         let value = bits_to_usize(&bits[i..i+10]);
-        result.push_str(&format!("{:03}", value));
+        if value <= 999 {
+            result.push_str(&format!("{:03}", value));
+        }
         i += 10;
     }
     
     if i + 7 <= bits.len() {
         let value = bits_to_usize(&bits[i..i+7]);
-        result.push_str(&format!("{:02}", value));
+        if value <= 99 {
+            result.push_str(&format!("{:02}", value));
+        }
         i += 7;
     }
     
     if i + 4 <= bits.len() {
         let value = bits_to_usize(&bits[i..i+4]);
-        result.push_str(&format!("{}", value));
+        if value <= 9 {
+            result.push_str(&format!("{}", value));
+        }
     }
     
     Some(result)
@@ -719,8 +730,14 @@ fn decode_byte_bits(bits: &[u8]) -> Option<String> {
     
     while i + 8 <= bits.len() {
         let byte_val = bits_to_usize(&bits[i..i+8]);
-        if let Some(ch) = char::from_u32(byte_val as u32) {
-            result.push(ch);
+        if byte_val <= 255 {
+            if let Some(ch) = char::from_u32(byte_val as u32) {
+                if ch.is_ascii() {
+                    result.push(ch);
+                } else {
+                    result.push('?');
+                }
+            }
         }
         i += 8;
     }
