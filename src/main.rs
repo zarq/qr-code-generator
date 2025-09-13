@@ -257,11 +257,13 @@ fn matrix_to_png(matrix: &Vec<Vec<u8>>, filename: &str) -> Result<(), Box<dyn st
 }
 
 fn print_help(program_name: &str) {
-    println!("Usage: {} <output_file.png> <url> [options]", program_name);
+    println!("Usage: {} [options]", program_name);
     println!();
     println!("Options:");
+    println!("  --output, -o <file>        Output PNG file (default: qr-code.png)");
+    println!("  --url, -u <url>            URL to encode (default: https://www.example.com/)");
     println!("  --version, -v [1-7]        QR code version (default: 3)");
-    println!("  [mask_pattern]             0-7 (default: 0)");
+    println!("  --mask-pattern, -mp [0-7]  Mask pattern (default: 0)");
     println!("  --skip-mask, -s            Skip mask application");
     println!("  --skip-format-mask, -sfm   Skip format mask application");
     println!("  --byte-mode, -b            Use byte mode encoding (default)");
@@ -278,27 +280,52 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     
-    if args.len() < 3 {
-        print_help(&args[0]);
-        std::process::exit(1);
-    }
-    
-    let filename = &args[1];
-    let url = &args[2];
-    
-    // Add .png extension if not present
-    let output_filename = if filename.ends_with(".png") {
-        filename.to_string()
-    } else {
-        format!("{}.png", filename)
-    };
-    
     let mut config = QrConfig::default();
-    let mut i = 3;
+    let mut i = 1;
     
-    // Parse remaining arguments
+    // Parse arguments
     while i < args.len() {
         match args[i].as_str() {
+            "--output" | "-o" => {
+                if i + 1 < args.len() {
+                    let filename = &args[i + 1];
+                    config.output_filename = if filename.ends_with(".png") {
+                        filename.to_string()
+                    } else {
+                        format!("{}.png", filename)
+                    };
+                    i += 1;
+                } else {
+                    eprintln!("Output option requires a filename.");
+                    std::process::exit(1);
+                }
+            }
+            "--url" | "-u" => {
+                if i + 1 < args.len() {
+                    config.url = args[i + 1].clone();
+                    i += 1;
+                } else {
+                    eprintln!("URL option requires a value.");
+                    std::process::exit(1);
+                }
+            }
+            "--mask-pattern" | "-mp" => {
+                if i + 1 < args.len() {
+                    match args[i + 1].parse::<u8>() {
+                        Ok(0) => config.mask_pattern = MaskPattern::Pattern0,
+                        Ok(1) => config.mask_pattern = MaskPattern::Pattern1,
+                        Ok(n) if n <= 7 => config.mask_pattern = MaskPattern::Pattern0, // Default for unimplemented
+                        _ => {
+                            eprintln!("Invalid mask pattern. Use 0-7.");
+                            std::process::exit(1);
+                        }
+                    }
+                    i += 1;
+                } else {
+                    eprintln!("Mask pattern option requires a value.");
+                    std::process::exit(1);
+                }
+            }
             "--skip-mask" | "-s" => config.skip_mask = true,
             "--skip-format-mask" | "-sfm" => config.skip_format_mask = true,
             "--byte-mode" | "-b" => config.data_mode = DataMode::Byte,
@@ -321,7 +348,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 7 => Version::V7,
                                 _ => unreachable!(),
                             };
-                            i += 1; // Skip the version number
+                            i += 1;
                         }
                         _ => {
                             eprintln!("Invalid version. Use 1-7.");
@@ -334,31 +361,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             _ => {
-                if let Ok(pattern) = args[i].parse::<u8>() {
-                    config.mask_pattern = match pattern {
-                        0 => MaskPattern::Pattern0,
-                        1 => MaskPattern::Pattern1,
-                        n if n <= 7 => MaskPattern::Pattern0, // Default for unimplemented patterns
-                        _ => {
-                            eprintln!("Invalid mask pattern. Use 0-7.");
-                            std::process::exit(1);
-                        }
-                    };
-                } else {
-                    eprintln!("Unknown argument: {}", args[i]);
-                    std::process::exit(1);
-                }
+                eprintln!("Unknown argument: {}. Use --help for usage information.", args[i]);
+                std::process::exit(1);
             }
         }
         i += 1;
     }
     
-    let matrix = generate_qr_matrix(url, &config);
-    matrix_to_png(&matrix, &output_filename)?;
+    // Apply parsed values or use defaults
+    let matrix = generate_qr_matrix(&config.url, &config);
+    matrix_to_png(&matrix, &config.output_filename)?;
     
     let mask_status = if config.skip_mask { "skipped" } else { "applied" };
     let format_mask_status = if config.skip_format_mask { "skipped" } else { "applied" };
     println!("QR code saved to {} (Version {:?}) with mask pattern {:?} ({}) and format mask ({}) using {:?} mode", 
-             output_filename, config.version, config.mask_pattern, mask_status, format_mask_status, config.data_mode);
+             config.output_filename, config.version, config.mask_pattern, mask_status, format_mask_status, config.data_mode);
     Ok(())
 }

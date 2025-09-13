@@ -53,6 +53,8 @@ pub struct QrConfig {
     pub mask_pattern: MaskPattern,
     pub skip_mask: bool,
     pub skip_format_mask: bool,
+    pub output_filename: String,
+    pub url: String,
 }
 
 impl Default for QrConfig {
@@ -64,6 +66,8 @@ impl Default for QrConfig {
             mask_pattern: MaskPattern::Pattern0,
             skip_mask: false,
             skip_format_mask: false,
+            output_filename: "qr-code.png".to_string(),
+            url: "https://www.example.com/".to_string(),
         }
     }
 }
