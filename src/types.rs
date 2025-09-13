@@ -1,4 +1,4 @@
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Version {
     V1, V2, V3, V4, V5, V6, V7, V8, V9, V10,
     V11, V12, V13, V14, V15, V16, V17, V18, V19, V20,
@@ -50,6 +50,9 @@ pub struct QrConfig {
     pub version: Version,
     pub error_correction: ErrorCorrection,
     pub data_mode: DataMode,
+    pub mask_pattern: MaskPattern,
+    pub skip_mask: bool,
+    pub skip_format_mask: bool,
 }
 
 impl Default for QrConfig {
@@ -57,7 +60,10 @@ impl Default for QrConfig {
         Self {
             version: Version::V3,
             error_correction: ErrorCorrection::H,
-            data_mode: DataMode::Alphanumeric,
+            data_mode: DataMode::Byte,
+            mask_pattern: MaskPattern::Pattern0,
+            skip_mask: false,
+            skip_format_mask: false,
         }
     }
 }

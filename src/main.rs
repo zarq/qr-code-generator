@@ -4,7 +4,7 @@ use std::env;
 mod types;
 mod mask;
 mod encoding;
-use types::{Version, ErrorCorrection, MaskPattern, DataMode};
+use types::{Version, ErrorCorrection, MaskPattern, DataMode, QrConfig};
 use mask::apply_mask;
 use encoding::{encode_data, EncodedData};
 
@@ -90,7 +90,20 @@ fn add_format_info(matrix: &mut Vec<Vec<u8>>, error_correction: ErrorCorrection,
         MaskPattern::Pattern6 => 0b110,
         MaskPattern::Pattern7 => 0b111,
     };
-    let format_info = (format_bits << 3) | mask_bits;
+    let data = (format_bits << 3) | mask_bits;
+    
+    // Calculate BCH(15,5) error correction for format info
+    let mut format_info = data << 10;
+    let generator = 0b10100110111; // x^10 + x^8 + x^5 + x^4 + x^2 + x + 1
+    
+    for _ in 0..5 {
+        if (format_info & 0b100000000000000) != 0 {
+            format_info ^= generator;
+        }
+        format_info <<= 1;
+    }
+    
+    let format_info = (data << 10) | (format_info >> 5);
     
     // Top-left format info (around position pattern)
     for i in 0..6 {
@@ -193,32 +206,36 @@ fn add_dark_module(matrix: &mut Vec<Vec<u8>>, version: Version) {
     matrix[(4 * version as usize) + 13][8] = 1;
 }
 
-fn generate_qr_matrix(url: &str, version: Version, mask_pattern: MaskPattern, skip_mask: bool, data_mode: DataMode) -> Vec<Vec<u8>> {
-    let size = version.size();
+fn generate_qr_matrix(url: &str, config: &QrConfig) -> Vec<Vec<u8>> {
+    let size = config.version.size();
     let mut matrix = vec![vec![0u8; size]; size];
     
     // Encode the data
-    let encoded = encode_data(url, version, ErrorCorrection::H, data_mode);
+    let encoded = encode_data(url, config.version, config.error_correction, config.data_mode);
     
     // Place the encoded data
     place_data_bits(&mut matrix, &encoded);
     
-    if !skip_mask {
-        apply_mask(&mut matrix, mask_pattern);
+    if !config.skip_mask {
+        apply_mask(&mut matrix, config.mask_pattern);
     }
     
     add_position_pattern(&mut matrix, 0, 0);
     add_position_pattern(&mut matrix, size - 7, 0);
     add_position_pattern(&mut matrix, 0, size - 7);
     
-    if size > 25 {
+    if size > 21 {
         add_alignment_pattern(&mut matrix, size - 9, size - 9);
     }
     
     add_timing_patterns(&mut matrix, size);
-    add_format_info(&mut matrix, ErrorCorrection::H, mask_pattern);
-    apply_format_mask(&mut matrix);
-    add_dark_module(&mut matrix, version);
+    add_format_info(&mut matrix, config.error_correction, config.mask_pattern);
+    
+    if !config.skip_format_mask {
+        apply_format_mask(&mut matrix);
+    }
+    
+    add_dark_module(&mut matrix, config.version);
     
     matrix
 }
@@ -239,35 +256,79 @@ fn matrix_to_png(matrix: &Vec<Vec<u8>>, filename: &str) -> Result<(), Box<dyn st
     Ok(())
 }
 
+fn print_help(program_name: &str) {
+    println!("Usage: {} <output_file.png> <url> [options]", program_name);
+    println!();
+    println!("Options:");
+    println!("  --version, -v [1-7]        QR code version (default: 3)");
+    println!("  [mask_pattern]             0-7 (default: 0)");
+    println!("  --skip-mask, -s            Skip mask application");
+    println!("  --skip-format-mask, -sfm   Skip format mask application");
+    println!("  --byte-mode, -b            Use byte mode encoding (default)");
+    println!("  --alphanumeric-mode, -a    Use alphanumeric mode encoding");
+    println!("  --help, -h                 Show this help message");
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     
+    // Check for help first
+    if args.len() > 1 && (args[1] == "--help" || args[1] == "-h") {
+        print_help(&args[0]);
+        return Ok(());
+    }
+    
     if args.len() < 3 {
-        eprintln!("Usage: {} <output_file.png> <url> [options]", args[0]);
-        eprintln!("Options:");
-        eprintln!("  [mask_pattern]     0-7 (default: 0)");
-        eprintln!("  --skip-mask, -s    Skip mask application");
-        eprintln!("  --byte-mode, -b    Use byte mode encoding (default)");
-        eprintln!("  --alphanumeric-mode, -a  Use alphanumeric mode encoding");
+        print_help(&args[0]);
         std::process::exit(1);
     }
     
     let filename = &args[1];
     let url = &args[2];
     
-    let mut mask_pattern = MaskPattern::default();
-    let mut skip_mask = false;
-    let mut data_mode = DataMode::Byte; // Default to byte mode
+    let mut config = QrConfig::default();
+    let mut i = 3;
     
     // Parse remaining arguments
-    for arg in &args[3..] {
-        match arg.as_str() {
-            "--skip-mask" | "-s" => skip_mask = true,
-            "--byte-mode" | "-b" => data_mode = DataMode::Byte,
-            "--alphanumeric-mode" | "-a" => data_mode = DataMode::Alphanumeric,
+    while i < args.len() {
+        match args[i].as_str() {
+            "--skip-mask" | "-s" => config.skip_mask = true,
+            "--skip-format-mask" | "-sfm" => config.skip_format_mask = true,
+            "--byte-mode" | "-b" => config.data_mode = DataMode::Byte,
+            "--alphanumeric-mode" | "-a" => config.data_mode = DataMode::Alphanumeric,
+            "--help" | "-h" => {
+                print_help(&args[0]);
+                return Ok(());
+            }
+            "--version" | "-v" => {
+                if i + 1 < args.len() {
+                    match args[i + 1].parse::<u8>() {
+                        Ok(v @ 1..=7) => {
+                            config.version = match v {
+                                1 => Version::V1,
+                                2 => Version::V2,
+                                3 => Version::V3,
+                                4 => Version::V4,
+                                5 => Version::V5,
+                                6 => Version::V6,
+                                7 => Version::V7,
+                                _ => unreachable!(),
+                            };
+                            i += 1; // Skip the version number
+                        }
+                        _ => {
+                            eprintln!("Invalid version. Use 1-7.");
+                            std::process::exit(1);
+                        }
+                    }
+                } else {
+                    eprintln!("Version option requires a value.");
+                    std::process::exit(1);
+                }
+            }
             _ => {
-                if let Ok(pattern) = arg.parse::<u8>() {
-                    mask_pattern = match pattern {
+                if let Ok(pattern) = args[i].parse::<u8>() {
+                    config.mask_pattern = match pattern {
                         0 => MaskPattern::Pattern0,
                         1 => MaskPattern::Pattern1,
                         n if n <= 7 => MaskPattern::Pattern0, // Default for unimplemented patterns
@@ -277,18 +338,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     };
                 } else {
-                    eprintln!("Unknown argument: {}", arg);
+                    eprintln!("Unknown argument: {}", args[i]);
                     std::process::exit(1);
                 }
             }
         }
+        i += 1;
     }
     
-    let matrix = generate_qr_matrix(url, Version::V3, mask_pattern, skip_mask, data_mode);
+    let matrix = generate_qr_matrix(url, &config);
     matrix_to_png(&matrix, filename)?;
     
-    let mask_status = if skip_mask { "skipped" } else { "applied" };
-    println!("QR code saved to {} with mask pattern {:?} ({}) using {:?} mode", 
-             filename, mask_pattern, mask_status, data_mode);
+    let mask_status = if config.skip_mask { "skipped" } else { "applied" };
+    let format_mask_status = if config.skip_format_mask { "skipped" } else { "applied" };
+    println!("QR code saved to {} (Version {:?}) with mask pattern {:?} ({}) and format mask ({}) using {:?} mode", 
+             filename, config.version, config.mask_pattern, mask_status, format_mask_status, config.data_mode);
     Ok(())
 }
