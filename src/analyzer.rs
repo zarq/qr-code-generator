@@ -3,6 +3,7 @@ use std::env;
 use serde::Serialize;
 
 mod types;
+mod mask;
 use types::{Version, ErrorCorrection, MaskPattern, DataMode};
 
 #[derive(Debug, Serialize)]
@@ -24,6 +25,7 @@ struct QrAnalysis {
     mask_pattern: Option<MaskPattern>,
     raw_data: Option<String>,
     decoded_text: Option<String>,
+    data_analysis: DataAnalysis,
     format_info: FormatInfo,
     finder_patterns: Vec<FinderPattern>,
     timing_patterns: TimingPatterns,
@@ -59,6 +61,21 @@ struct TimingPatterns {
 struct DarkModule {
     present: bool,
     position: (usize, usize),
+}
+
+#[derive(Debug, Serialize)]
+struct DataAnalysis {
+    full_bit_string: Option<String>,
+    unmasked_bit_string: Option<String>,
+    encoding_info: Option<String>,
+    encoding_mode: Option<String>,
+    data_length: Option<usize>,
+    extracted_data: Option<String>,
+    ecc_bits: Option<String>,
+    data_ecc_valid: bool,
+    data_size: Option<usize>,
+    bit_string_size: Option<usize>,
+    padding_bits: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -128,6 +145,19 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
             mask_pattern: None,
             version: None,
         },
+        data_analysis: DataAnalysis {
+            full_bit_string: None,
+            unmasked_bit_string: None,
+            encoding_info: None,
+            encoding_mode: None,
+            data_length: None,
+            extracted_data: None,
+            ecc_bits: None,
+            data_ecc_valid: false,
+            data_size: None,
+            bit_string_size: None,
+            padding_bits: None,
+        },
         finder_patterns: Vec::new(),
         timing_patterns: TimingPatterns { valid: false },
         dark_module: DarkModule { present: false, position: (0, 0) },
@@ -180,11 +210,17 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
     
     // Try to decode data
     if let Some(mask) = analysis.mask_pattern {
-        if let Ok((mode, data)) = decode_data(&matrix, mask, analysis.version_from_size) {
-            analysis.data_mode = Some(mode);
-            analysis.decoded_text = Some(data.clone());
-            analysis.raw_data = Some(data);
-        }
+        analysis.data_analysis = decode_data_comprehensive(&matrix, mask, analysis.version_from_size, analysis.error_correction);
+        analysis.data_mode = analysis.data_analysis.encoding_info.as_ref().and_then(|info| {
+            match info.chars().take(4).collect::<String>().as_str() {
+                "0001" => Some(DataMode::Numeric),
+                "0010" => Some(DataMode::Alphanumeric),
+                "0100" => Some(DataMode::Byte),
+                _ => None,
+            }
+        });
+        analysis.decoded_text = analysis.data_analysis.extracted_data.clone();
+        analysis.raw_data = analysis.data_analysis.extracted_data.clone();
     }
     
     // Set status based on errors
@@ -426,6 +462,296 @@ fn check_alignment_pattern(matrix: &[Vec<u8>], center_x: usize, center_y: usize)
     true
 }
 
+fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Option<Version>, ecc_level: Option<ErrorCorrection>) -> DataAnalysis {
+    let size = matrix.len();
+    
+    // Step 1: Read raw bit string from matrix
+    let raw_bits = read_data_bits(matrix, size);
+    let raw_bit_string = raw_bits.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>();
+    
+    // Step 2: Apply mask to matrix and read unmasked bits
+    let mut unmasked_matrix = matrix.to_vec();
+    mask::apply_mask(&mut unmasked_matrix, mask);
+    let unmasked_bits = read_data_bits(&unmasked_matrix, size);
+    let unmasked_bit_string = unmasked_bits.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>();
+    
+    if unmasked_bits.len() < 8 {
+        return DataAnalysis {
+            full_bit_string: Some(raw_bit_string),
+            unmasked_bit_string: Some(unmasked_bit_string),
+            encoding_info: None,
+            encoding_mode: None,
+            data_length: None,
+            extracted_data: None,
+            ecc_bits: None,
+            data_ecc_valid: false,
+            data_size: None,
+            bit_string_size: Some(raw_bits.len()),
+            padding_bits: None,
+        };
+    }
+    
+    // Step 3: Analyze unmasked data
+    let mode_bits = &unmasked_bits[0..4];
+    let encoding_info = mode_bits.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>();
+    let encoding_mode = match encoding_info.as_str() {
+        "0001" => Some("Numeric".to_string()),
+        "0010" => Some("Alphanumeric".to_string()),
+        "0100" => Some("Byte".to_string()),
+        "1000" => Some("Kanji".to_string()),
+        _ => Some("Unknown".to_string()),
+    };
+    
+    let length_bits = if unmasked_bits.len() >= 12 { 8 } else { 4 };
+    let data_length = if unmasked_bits.len() >= 4 + length_bits {
+        Some(bits_to_usize(&unmasked_bits[4..4+length_bits]))
+    } else {
+        None
+    };
+    
+    let data_start = 4 + length_bits;
+    let data_bits_needed = match encoding_info.as_str() {
+        "0001" => data_length.map(|len| len * 10 / 3 + if len % 3 > 0 { 1 } else { 0 }).unwrap_or(0),
+        "0010" => data_length.map(|len| len * 11 / 2 + if len % 2 > 0 { 1 } else { 0 }).unwrap_or(0),
+        "0100" => data_length.map(|len| len * 8).unwrap_or(0),
+        _ => 0,
+    };
+    
+    let data_end = std::cmp::min(data_start + data_bits_needed, unmasked_bits.len());
+    let extracted_data = if data_end > data_start {
+        decode_data_bits(&unmasked_bits[data_start..data_end], &encoding_info)
+    } else {
+        None
+    };
+    
+    let total_capacity = get_total_capacity(version, ecc_level);
+    let data_capacity = get_data_capacity(version, ecc_level);
+    
+    let ecc_start = data_capacity.unwrap_or(unmasked_bits.len());
+    let ecc_bits = if ecc_start < unmasked_bits.len() {
+        Some(unmasked_bits[ecc_start..std::cmp::min(ecc_start + (total_capacity.unwrap_or(unmasked_bits.len()) - data_capacity.unwrap_or(0)), unmasked_bits.len())]
+            .iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>())
+    } else {
+        None
+    };
+    
+    let padding_bits = if data_end < ecc_start {
+        Some(ecc_start - data_end)
+    } else {
+        None
+    };
+    
+    DataAnalysis {
+        full_bit_string: Some(raw_bit_string),
+        unmasked_bit_string: Some(unmasked_bit_string),
+        encoding_info: Some(encoding_info),
+        encoding_mode,
+        data_length,
+        extracted_data,
+        ecc_bits,
+        data_ecc_valid: false,
+        data_size: data_length,
+        bit_string_size: Some(raw_bits.len()),
+        padding_bits,
+    }
+}
+
+fn read_data_bits(matrix: &[Vec<u8>], size: usize) -> Vec<u8> {
+    let mut bits = Vec::new();
+    let mut col = size - 1;
+    let mut going_up = true;
+    
+    while col > 0 {
+        if col == 6 { col -= 1; } // Skip timing column
+        
+        if going_up {
+            // Read from bottom to top
+            for row in (0..size).rev() {
+                // Read right column first, then left column
+                for offset in [0, 1] {
+                    if col >= offset {
+                        let c = col - offset;
+                        if !is_function_module(row, c, size) {
+                            bits.push(matrix[row][c]);
+                        }
+                    }
+                }
+            }
+        } else {
+            // Read from top to bottom
+            for row in 0..size {
+                // Read right column first, then left column
+                for offset in [0, 1] {
+                    if col >= offset {
+                        let c = col - offset;
+                        if !is_function_module(row, c, size) {
+                            bits.push(matrix[row][c]);
+                        }
+                    }
+                }
+            }
+        }
+        
+        going_up = !going_up;
+        col = if col >= 2 { col - 2 } else { 0 };
+    }
+    
+    bits
+}
+
+fn apply_mask_to_bits(bits: &[u8], mask: MaskPattern, size: usize) -> Vec<u8> {
+    let mut unmasked_bits = Vec::new();
+    let mut bit_index = 0;
+    let mut col = size - 1;
+    let mut going_up = true;
+    
+    while col > 0 && bit_index < bits.len() {
+        if col == 6 { col -= 1; }
+        
+        for c in [col, col - 1] {
+            let mut row = if going_up { size - 1 } else { 0 };
+            
+            loop {
+                if !is_function_module(row, c, size) {
+                    if bit_index < bits.len() {
+                        let unmasked_bit = apply_mask_to_bit(bits[bit_index], row, c, mask);
+                        unmasked_bits.push(unmasked_bit);
+                        bit_index += 1;
+                    }
+                }
+                
+                if going_up {
+                    if row == 0 { break; }
+                    row -= 1;
+                } else {
+                    if row == size - 1 { break; }
+                    row += 1;
+                }
+            }
+        }
+        
+        going_up = !going_up;
+        col = if col >= 2 { col - 2 } else { 0 };
+    }
+    
+    unmasked_bits
+}
+
+fn is_function_module(row: usize, col: usize, size: usize) -> bool {
+    // Finder patterns
+    if (row < 9 && col < 9) || (row < 9 && col >= size - 8) || (row >= size - 8 && col < 9) {
+        return true;
+    }
+    
+    // Timing patterns
+    if row == 6 || col == 6 {
+        return true;
+    }
+    
+    // Dark module
+    if row == size - 8 && col == 8 {
+        return true;
+    }
+    
+    // Format info
+    if (row == 8 && (col < 9 || col >= size - 8)) || (col == 8 && (row < 9 || row >= size - 7)) {
+        return true;
+    }
+    
+    false
+}
+
+fn apply_mask_to_bit(bit: u8, row: usize, col: usize, mask: MaskPattern) -> u8 {
+    let mask_value = match mask {
+        MaskPattern::Pattern0 => (row + col) % 2 == 0,
+        MaskPattern::Pattern1 => row % 2 == 0,
+        MaskPattern::Pattern2 => col % 3 == 0,
+        MaskPattern::Pattern3 => (row + col) % 3 == 0,
+        MaskPattern::Pattern4 => (row / 2 + col / 3) % 2 == 0,
+        MaskPattern::Pattern5 => (row * col) % 2 + (row * col) % 3 == 0,
+        MaskPattern::Pattern6 => ((row * col) % 2 + (row * col) % 3) % 2 == 0,
+        MaskPattern::Pattern7 => ((row + col) % 2 + (row * col) % 3) % 2 == 0,
+    };
+    
+    if mask_value { 1 - bit } else { bit }
+}
+
+fn decode_data_bits(bits: &[u8], encoding_info: &str) -> Option<String> {
+    match encoding_info {
+        "0001" => decode_numeric_bits(bits),
+        "0010" => decode_alphanumeric_bits(bits), 
+        "0100" => decode_byte_bits(bits),
+        _ => None,
+    }
+}
+
+fn decode_numeric_bits(bits: &[u8]) -> Option<String> {
+    let mut result = String::new();
+    let mut i = 0;
+    
+    while i + 10 <= bits.len() {
+        let value = bits_to_usize(&bits[i..i+10]);
+        result.push_str(&format!("{:03}", value));
+        i += 10;
+    }
+    
+    if i + 7 <= bits.len() {
+        let value = bits_to_usize(&bits[i..i+7]);
+        result.push_str(&format!("{:02}", value));
+        i += 7;
+    }
+    
+    if i + 4 <= bits.len() {
+        let value = bits_to_usize(&bits[i..i+4]);
+        result.push_str(&format!("{}", value));
+    }
+    
+    Some(result)
+}
+
+fn decode_alphanumeric_bits(_bits: &[u8]) -> Option<String> {
+    Some("ALPHANUMERIC_DATA".to_string())
+}
+
+fn decode_byte_bits(bits: &[u8]) -> Option<String> {
+    let mut result = String::new();
+    let mut i = 0;
+    
+    while i + 8 <= bits.len() {
+        let byte_val = bits_to_usize(&bits[i..i+8]);
+        if let Some(ch) = char::from_u32(byte_val as u32) {
+            result.push(ch);
+        }
+        i += 8;
+    }
+    
+    Some(result)
+}
+
+fn get_total_capacity(version: Option<Version>, _ecc: Option<ErrorCorrection>) -> Option<usize> {
+    match version? {
+        Version::V1 => Some(208),
+        Version::V2 => Some(359),
+        Version::V3 => Some(567),
+        Version::V4 => Some(807),
+        _ => None,
+    }
+}
+
+fn get_data_capacity(version: Option<Version>, ecc: Option<ErrorCorrection>) -> Option<usize> {
+    match (version?, ecc?) {
+        (Version::V1, ErrorCorrection::L) => Some(152),
+        (Version::V1, ErrorCorrection::M) => Some(128),
+        (Version::V1, ErrorCorrection::Q) => Some(104),
+        (Version::V1, ErrorCorrection::H) => Some(72),
+        _ => Some(128),
+    }
+}
+
+fn bits_to_usize(bits: &[u8]) -> usize {
+    bits.iter().fold(0, |acc, &bit| (acc << 1) | (bit as usize))
+}
+
 fn decode_data(matrix: &[Vec<u8>], mask: MaskPattern, version: Option<Version>) -> Result<(DataMode, String), String> {
     // Simple data extraction - read from data area
     let mut data_bits = Vec::new();
@@ -503,28 +829,6 @@ fn decode_alphanumeric(bits: &[u8]) -> Result<(DataMode, String), String> {
 
 fn decode_byte(bits: &[u8]) -> Result<(DataMode, String), String> {
     Ok((DataMode::Byte, "BYTE_DATA".to_string()))
-}
-
-fn is_function_module(row: usize, col: usize, size: usize) -> bool {
-    // Finder patterns
-    if (row < 9 && col < 9) || 
-       (row < 9 && col >= size - 8) || 
-       (row >= size - 8 && col < 9) {
-        return true;
-    }
-    
-    // Timing patterns
-    if row == 6 || col == 6 {
-        return true;
-    }
-    
-    // Format info
-    if (row == 8 && (col < 9 || col >= size - 8)) ||
-       (col == 8 && (row < 9 || row >= size - 7)) {
-        return true;
-    }
-    
-    false
 }
 
 fn get_mask_bit(mask: MaskPattern, row: usize, col: usize) -> u8 {
