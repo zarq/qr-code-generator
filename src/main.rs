@@ -286,6 +286,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let filename = &args[1];
     let url = &args[2];
     
+    // Add .png extension if not present
+    let output_filename = if filename.ends_with(".png") {
+        filename.to_string()
+    } else {
+        format!("{}.png", filename)
+    };
+    
     let mut config = QrConfig::default();
     let mut i = 3;
     
@@ -347,11 +354,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     
     let matrix = generate_qr_matrix(url, &config);
-    matrix_to_png(&matrix, filename)?;
+    matrix_to_png(&matrix, &output_filename)?;
     
     let mask_status = if config.skip_mask { "skipped" } else { "applied" };
     let format_mask_status = if config.skip_format_mask { "skipped" } else { "applied" };
     println!("QR code saved to {} (Version {:?}) with mask pattern {:?} ({}) and format mask ({}) using {:?} mode", 
-             filename, config.version, config.mask_pattern, mask_status, format_mask_status, config.data_mode);
+             output_filename, config.version, config.mask_pattern, mask_status, format_mask_status, config.data_mode);
     Ok(())
 }
