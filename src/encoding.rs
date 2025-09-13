@@ -6,31 +6,31 @@ pub struct EncodedData {
     pub ecc_bits: Vec<u8>,
 }
 
-pub fn encode_data(url: &str, version: Version, error_correction: ErrorCorrection, mode: DataMode) -> EncodedData {
+pub fn encode_data(data: &str, version: Version, error_correction: ErrorCorrection, mode: DataMode) -> EncodedData {
     let data_bits = match mode {
-        DataMode::Numeric => encode_numeric(url, version),
-        DataMode::Byte => encode_byte(url, version),
-        DataMode::Alphanumeric => encode_alphanumeric(url, version),
+        DataMode::Numeric => encode_numeric(data, version),
+        DataMode::Byte => encode_byte(data, version),
+        DataMode::Alphanumeric => encode_alphanumeric(data, version),
     };
     let ecc_bits = generate_ecc(&data_bits, version, error_correction);
     
     EncodedData { data_bits, ecc_bits }
 }
 
-fn encode_numeric(url: &str, _version: Version) -> Vec<u8> {
+fn encode_numeric(data: &str, _version: Version) -> Vec<u8> {
     let mut bits = Vec::new();
     
     // Mode indicator (4 bits) - Numeric = 0001
     bits.extend_from_slice(&[0, 0, 0, 1]);
     
     // Character count (10 bits for Version 3)
-    let count = url.len();
+    let count = data.len();
     for i in (0..10).rev() {
         bits.push(((count >> i) & 1) as u8);
     }
     
     // Encode digits in groups of 3
-    let digits: Vec<char> = url.chars().collect();
+    let digits: Vec<char> = data.chars().collect();
     for chunk in digits.chunks(3) {
         match chunk.len() {
             3 => {
@@ -61,20 +61,20 @@ fn encode_numeric(url: &str, _version: Version) -> Vec<u8> {
     bits
 }
 
-fn encode_byte(url: &str, _version: Version) -> Vec<u8> {
+fn encode_byte(data: &str, _version: Version) -> Vec<u8> {
     let mut bits = Vec::new();
     
     // Mode indicator (4 bits) - Byte = 0100
     bits.extend_from_slice(&[0, 1, 0, 0]);
     
     // Character count (8 bits for Version 3)
-    let count = url.len();
+    let count = data.len();
     for i in (0..8).rev() {
         bits.push(((count >> i) & 1) as u8);
     }
     
     // Encode each byte
-    for byte in url.bytes() {
+    for byte in data.bytes() {
         for i in (0..8).rev() {
             bits.push(((byte >> i) & 1) as u8);
         }
@@ -83,20 +83,20 @@ fn encode_byte(url: &str, _version: Version) -> Vec<u8> {
     bits
 }
 
-fn encode_alphanumeric(url: &str, _version: Version) -> Vec<u8> {
+fn encode_alphanumeric(data: &str, _version: Version) -> Vec<u8> {
     let mut bits = Vec::new();
     
     // Mode indicator (4 bits) - Alphanumeric = 0010
     bits.extend_from_slice(&[0, 0, 1, 0]);
     
     // Character count (9 bits for Version 3)
-    let count = url.len();
+    let count = data.len();
     for i in (0..9).rev() {
         bits.push(((count >> i) & 1) as u8);
     }
     
     // Encode character pairs
-    let chars: Vec<char> = url.chars().collect();
+    let chars: Vec<char> = data.chars().collect();
     for chunk in chars.chunks(2) {
         if chunk.len() == 2 {
             let val1 = alphanumeric_value(chunk[0]);

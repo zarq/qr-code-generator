@@ -264,7 +264,7 @@ fn print_verbose_info(config: &QrConfig, encoded: &EncodedData, version: Version
     println!("Version: {:?} ({}x{}) - Auto-calculated", version, version.size(), version.size());
     println!("Error Correction: {:?}", config.error_correction);
     println!("Data Mode: {:?}", config.data_mode);
-    println!("Data Length: {} characters", config.url.len());
+    println!("Data Length: {} characters", config.data.len());
     println!("Mask Pattern: {:?}", config.mask_pattern);
     
     println!("\n=== Format Information ===");
@@ -336,14 +336,14 @@ fn calculate_version(data: &str, error_correction: ErrorCorrection, data_mode: D
     Version::V7 // Fallback to largest supported version
 }
 
-fn generate_qr_matrix(url: &str, config: &QrConfig) -> Vec<Vec<u8>> {
+fn generate_qr_matrix(data: &str, config: &QrConfig) -> Vec<Vec<u8>> {
     // Calculate appropriate version based on data
-    let version = calculate_version(url, config.error_correction, config.data_mode);
+    let version = calculate_version(data, config.error_correction, config.data_mode);
     let size = version.size();
     let mut matrix = vec![vec![0u8; size]; size];
     
     // Encode the data
-    let encoded = encode_data(url, version, config.error_correction, config.data_mode);
+    let encoded = encode_data(data, version, config.error_correction, config.data_mode);
     
     if config.verbose {
         print_verbose_info(config, &encoded, version);
@@ -428,7 +428,7 @@ fn print_help(program_name: &str) {
     println!("  --output, -o <file>        Output file (default: qr-code.png)");
     println!("  --png, -P                  Output PNG format (default)");
     println!("  --svg, -S                  Output SVG format");
-    println!("  --url, -u <url>            URL to encode (default: https://www.example.com/)");
+    println!("  --data, -d <data>            Data to encode (default: https://www.example.com/)");
     println!("  --ecc-level, -l [L|M|Q|H]  Error correction level (default: M)");
     println!("  --mask-pattern, -mp [0-7]  Mask pattern (default: 0)");
     println!("  --skip-mask, -s            Skip mask application");
@@ -481,9 +481,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 config.output_format = OutputFormat::Svg;
                 svg_explicitly_set = true;
             }
-            "--url" | "-u" => {
+            "--data" | "-d" => {
                 if i + 1 < args.len() {
-                    config.url = args[i + 1].clone();
+                    config.data = args[i + 1].clone();
                     i += 1;
                 } else {
                     eprintln!("URL option requires a value.");
@@ -566,8 +566,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     
     // Apply parsed values or use defaults
-    let matrix = generate_qr_matrix(&config.url, &config);
-    let version = calculate_version(&config.url, config.error_correction, config.data_mode);
+    let matrix = generate_qr_matrix(&config.data, &config);
+    let version = calculate_version(&config.data, config.error_correction, config.data_mode);
     save_matrix(&matrix, &config)?;
     
     let mask_status = if config.skip_mask { "skipped" } else { "applied" };

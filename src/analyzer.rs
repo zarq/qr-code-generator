@@ -546,6 +546,12 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
         None
     };
     
+    let data_ecc_valid = if let (Some(data_cap), Some(total_cap)) = (data_capacity, total_capacity) {
+        validate_ecc(&unmasked_bits, data_cap, total_cap - data_cap, ecc_level)
+    } else {
+        false
+    };
+    
     DataAnalysis {
         full_bit_string: Some(raw_bit_string),
         unmasked_bit_string: Some(unmasked_bit_string),
@@ -554,7 +560,7 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
         data_length,
         extracted_data,
         ecc_bits,
-        data_ecc_valid: false,
+        data_ecc_valid,
         data_size: data_length,
         bit_string_size: Some(raw_bits.len()),
         padding_bits,
@@ -763,6 +769,45 @@ fn get_data_capacity(version: Option<Version>, ecc: Option<ErrorCorrection>) -> 
         (Version::V1, ErrorCorrection::H) => Some(72),
         _ => Some(128),
     }
+}
+
+fn validate_ecc(bits: &[u8], data_bits: usize, ecc_bits: usize, ecc_level: Option<ErrorCorrection>) -> bool {
+    if bits.len() < data_bits + ecc_bits {
+        return false;
+    }
+    
+    // Convert bits to bytes
+    let mut data_bytes = Vec::new();
+    let mut ecc_bytes = Vec::new();
+    
+    // Extract data bytes
+    for i in (0..data_bits).step_by(8) {
+        if i + 8 <= data_bits {
+            let byte_val = bits_to_usize(&bits[i..i+8]) as u8;
+            data_bytes.push(byte_val);
+        }
+    }
+    
+    // Extract ECC bytes
+    for i in (data_bits..data_bits + ecc_bits).step_by(8) {
+        if i + 8 <= data_bits + ecc_bits {
+            let byte_val = bits_to_usize(&bits[i..i+8]) as u8;
+            ecc_bytes.push(byte_val);
+        }
+    }
+    
+    // Simple validation: check if we have the expected number of bytes
+    let expected_ecc_bytes = match ecc_level {
+        Some(ErrorCorrection::L) => 7,  // V1 L level
+        Some(ErrorCorrection::M) => 10, // V1 M level  
+        Some(ErrorCorrection::Q) => 13, // V1 Q level
+        Some(ErrorCorrection::H) => 17, // V1 H level
+        _ => return false,
+    };
+    
+    // For now, just validate we have the right structure
+    // Full Reed-Solomon validation would require implementing the RS algorithm
+    data_bytes.len() > 0 && ecc_bytes.len() == expected_ecc_bytes
 }
 
 fn bits_to_usize(bits: &[u8]) -> usize {

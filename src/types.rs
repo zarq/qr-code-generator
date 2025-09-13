@@ -58,7 +58,7 @@ pub struct QrConfig {
     pub skip_mask: bool,
     pub output_filename: String,
     pub output_format: OutputFormat,
-    pub url: String,
+    pub data: String,
     pub verbose: bool,
 }
 
@@ -71,7 +71,7 @@ impl Default for QrConfig {
             skip_mask: false,
             output_filename: "qr-code.png".to_string(),
             output_format: OutputFormat::Png,
-            url: "https://www.example.com/".to_string(),
+            data: "https://www.example.com/".to_string(),
             verbose: false,
         }
     }
