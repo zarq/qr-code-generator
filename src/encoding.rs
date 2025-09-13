@@ -8,13 +8,57 @@ pub struct EncodedData {
 
 pub fn encode_data(url: &str, version: Version, error_correction: ErrorCorrection, mode: DataMode) -> EncodedData {
     let data_bits = match mode {
+        DataMode::Numeric => encode_numeric(url, version),
         DataMode::Byte => encode_byte(url, version),
         DataMode::Alphanumeric => encode_alphanumeric(url, version),
-        _ => encode_byte(url, version), // Default to byte mode
     };
     let ecc_bits = generate_ecc(&data_bits, version, error_correction);
     
     EncodedData { data_bits, ecc_bits }
+}
+
+fn encode_numeric(url: &str, _version: Version) -> Vec<u8> {
+    let mut bits = Vec::new();
+    
+    // Mode indicator (4 bits) - Numeric = 0001
+    bits.extend_from_slice(&[0, 0, 0, 1]);
+    
+    // Character count (10 bits for Version 3)
+    let count = url.len();
+    for i in (0..10).rev() {
+        bits.push(((count >> i) & 1) as u8);
+    }
+    
+    // Encode digits in groups of 3
+    let digits: Vec<char> = url.chars().collect();
+    for chunk in digits.chunks(3) {
+        match chunk.len() {
+            3 => {
+                let val = chunk[0].to_digit(10).unwrap() * 100 + 
+                         chunk[1].to_digit(10).unwrap() * 10 + 
+                         chunk[2].to_digit(10).unwrap();
+                for i in (0..10).rev() {
+                    bits.push(((val >> i) & 1) as u8);
+                }
+            }
+            2 => {
+                let val = chunk[0].to_digit(10).unwrap() * 10 + 
+                         chunk[1].to_digit(10).unwrap();
+                for i in (0..7).rev() {
+                    bits.push(((val >> i) & 1) as u8);
+                }
+            }
+            1 => {
+                let val = chunk[0].to_digit(10).unwrap();
+                for i in (0..4).rev() {
+                    bits.push(((val >> i) & 1) as u8);
+                }
+            }
+            _ => {}
+        }
+    }
+    
+    bits
 }
 
 fn encode_byte(url: &str, _version: Version) -> Vec<u8> {

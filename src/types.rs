@@ -37,7 +37,6 @@ pub enum DataMode {
     Numeric,
     Alphanumeric,
     Byte,
-    Kanji,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -46,12 +45,19 @@ pub enum MaskPattern {
     Pattern4, Pattern5, Pattern6, Pattern7,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum OutputFormat {
+    Png,
+    Svg,
+}
+
 pub struct QrConfig {
     pub error_correction: ErrorCorrection,
     pub data_mode: DataMode,
     pub mask_pattern: MaskPattern,
     pub skip_mask: bool,
     pub output_filename: String,
+    pub output_format: OutputFormat,
     pub url: String,
     pub verbose: bool,
 }
@@ -64,10 +70,9 @@ impl Default for QrConfig {
             mask_pattern: MaskPattern::Pattern0,
             skip_mask: false,
             output_filename: "qr-code.png".to_string(),
+            output_format: OutputFormat::Png,
             url: "https://www.example.com/".to_string(),
             verbose: false,
         }
     }
 }
-
-pub type QrMatrix = [[u8; 29]; 29];

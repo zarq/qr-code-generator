@@ -5,10 +5,9 @@ mod types;
 mod mask;
 mod encoding;
 mod ecc;
-use types::{Version, ErrorCorrection, MaskPattern, DataMode, QrConfig};
+use types::{Version, ErrorCorrection, MaskPattern, DataMode, QrConfig, OutputFormat};
 use mask::apply_mask;
 use encoding::{encode_data, EncodedData};
-use ecc::generate_ecc;
 
 fn add_position_pattern(matrix: &mut Vec<Vec<u8>>, x: usize, y: usize) {
     let size = matrix.len();
@@ -257,7 +256,7 @@ fn is_function_module(x: usize, y: usize, size: usize) -> bool {
 
 fn add_dark_module(matrix: &mut Vec<Vec<u8>>, version: Version) {
     let size = version.size();
-    matrix[size - 7][8] = 1;
+    matrix[size - 8][8] = 1;
 }
 
 fn print_verbose_info(config: &QrConfig, encoded: &EncodedData, version: Version) {
@@ -272,12 +271,34 @@ fn print_verbose_info(config: &QrConfig, encoded: &EncodedData, version: Version
     let format_info = get_format_info(config.error_correction, config.mask_pattern);
     println!("Format info with ECC: {:015b}", format_info);
     
-    println!("\n=== Data and ECC ===");
-    println!("Data bits ({} bits): {:?}", encoded.data_bits.len(), 
-             encoded.data_bits.iter().map(|&b| b.to_string()).collect::<Vec<_>>().join(""));
-    println!("ECC bits ({} bits): {:?}", encoded.ecc_bits.len(),
-             encoded.ecc_bits.iter().map(|&b| b.to_string()).collect::<Vec<_>>().join(""));
+    println!("\n=== Data and ECC Blocks ===");
+    let (data_blocks, ecc_blocks) = get_block_structure(&encoded.data_bits, &encoded.ecc_bits);
+    
+    for (i, block) in data_blocks.iter().enumerate() {
+        let hex_bytes: Vec<String> = block.iter().map(|b| format!("{:02X}", b)).collect();
+        println!("Data Block {}: {} bytes", i + 1, block.len());
+        println!("  Hex: {}", hex_bytes.join(" "));
+    }
+    
+    for (i, block) in ecc_blocks.iter().enumerate() {
+        let hex_bytes: Vec<String> = block.iter().map(|b| format!("{:02X}", b)).collect();
+        println!("ECC Block {}: {} bytes", i + 1, block.len());
+        println!("  Hex: {}", hex_bytes.join(" "));
+    }
+    
+    println!("\n=== Raw Bit Streams ===");
+    println!("Data bits ({} bits): {}", encoded.data_bits.len(), 
+             format_bits_with_spaces(&encoded.data_bits));
+    println!("ECC bits ({} bits): {}", encoded.ecc_bits.len(),
+             format_bits_with_spaces(&encoded.ecc_bits));
     println!();
+}
+
+fn format_bits_with_spaces(bits: &[u8]) -> String {
+    bits.chunks(8)
+        .map(|chunk| chunk.iter().map(|&b| b.to_string()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn calculate_version(data: &str, error_correction: ErrorCorrection, data_mode: DataMode) -> Version {
@@ -350,6 +371,40 @@ fn generate_qr_matrix(url: &str, config: &QrConfig) -> Vec<Vec<u8>> {
     matrix
 }
 
+fn matrix_to_svg(matrix: &Vec<Vec<u8>>, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let size = matrix.len();
+    let scale = 10;
+    let svg_size = size * scale;
+    
+    let mut svg = String::new();
+    svg.push_str(&format!(r#"<?xml version="1.0" encoding="UTF-8"?>
+<svg width="{}" height="{}" viewBox="0 0 {} {}" xmlns="http://www.w3.org/2000/svg">
+<rect width="100%" height="100%" fill="white"/>
+"#, svg_size, svg_size, svg_size, svg_size));
+    
+    for (y, row) in matrix.iter().enumerate() {
+        for (x, &pixel) in row.iter().enumerate() {
+            if pixel == 1 {
+                let px = x * scale;
+                let py = y * scale;
+                svg.push_str(&format!(r#"<rect x="{}" y="{}" width="{}" height="{}" fill="black"/>
+"#, px, py, scale, scale));
+            }
+        }
+    }
+    
+    svg.push_str("</svg>");
+    std::fs::write(filename, svg)?;
+    Ok(())
+}
+
+fn save_matrix(matrix: &Vec<Vec<u8>>, config: &QrConfig) -> Result<(), Box<dyn std::error::Error>> {
+    match config.output_format {
+        OutputFormat::Png => matrix_to_png(matrix, &config.output_filename),
+        OutputFormat::Svg => matrix_to_svg(matrix, &config.output_filename),
+    }
+}
+
 fn matrix_to_png(matrix: &Vec<Vec<u8>>, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
     let size = matrix.len();
     let img_size = size + 4;
@@ -370,11 +425,14 @@ fn print_help(program_name: &str) {
     println!("Usage: {} [options]", program_name);
     println!();
     println!("Options:");
-    println!("  --output, -o <file>        Output PNG file (default: qr-code.png)");
+    println!("  --output, -o <file>        Output file (default: qr-code.png)");
+    println!("  --png, -P                  Output PNG format (default)");
+    println!("  --svg, -S                  Output SVG format");
     println!("  --url, -u <url>            URL to encode (default: https://www.example.com/)");
     println!("  --ecc-level, -l [L|M|Q|H]  Error correction level (default: M)");
     println!("  --mask-pattern, -mp [0-7]  Mask pattern (default: 0)");
     println!("  --skip-mask, -s            Skip mask application");
+    println!("  --numeric, -n              Use numeric mode encoding");
     println!("  --byte-mode, -b            Use byte mode encoding (default)");
     println!("  --alphanumeric-mode, -a    Use alphanumeric mode encoding");
     println!("  --verbose, -V              Print detailed QR code information
@@ -391,6 +449,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     
     let mut config = QrConfig::default();
+    let mut png_explicitly_set = false;
+    let mut svg_explicitly_set = false;
     let mut i = 1;
     
     // Parse arguments
@@ -398,17 +458,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match args[i].as_str() {
             "--output" | "-o" => {
                 if i + 1 < args.len() {
-                    let filename = &args[i + 1];
-                    config.output_filename = if filename.ends_with(".png") {
-                        filename.to_string()
-                    } else {
-                        format!("{}.png", filename)
-                    };
+                    config.output_filename = args[i + 1].clone();
                     i += 1;
                 } else {
                     eprintln!("Output option requires a filename.");
                     std::process::exit(1);
                 }
+            }
+            "--png" | "-P" => {
+                if svg_explicitly_set {
+                    eprintln!("Error: --png and --svg are mutually exclusive.");
+                    std::process::exit(1);
+                }
+                config.output_format = OutputFormat::Png;
+                png_explicitly_set = true;
+            }
+            "--svg" | "-S" => {
+                if png_explicitly_set {
+                    eprintln!("Error: --png and --svg are mutually exclusive.");
+                    std::process::exit(1);
+                }
+                config.output_format = OutputFormat::Svg;
+                svg_explicitly_set = true;
             }
             "--url" | "-u" => {
                 if i + 1 < args.len() {
@@ -442,6 +513,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "--skip-mask" | "-s" => config.skip_mask = true,
+            "--numeric" | "-n" => config.data_mode = DataMode::Numeric,
             "--byte-mode" | "-b" => config.data_mode = DataMode::Byte,
             "--alphanumeric-mode" | "-a" => config.data_mode = DataMode::Alphanumeric,
             "--verbose" | "-V" => config.verbose = true,
@@ -475,10 +547,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         i += 1;
     }
     
+    // Handle filename extensions based on output format
+    match config.output_format {
+        OutputFormat::Png => {
+            if config.output_filename == "qr-code.png" {
+                // Default case, already correct
+            } else if !config.output_filename.ends_with(".png") {
+                config.output_filename = format!("{}.png", config.output_filename);
+            }
+        }
+        OutputFormat::Svg => {
+            if config.output_filename == "qr-code.png" {
+                config.output_filename = "qr-code.svg".to_string();
+            } else if !config.output_filename.ends_with(".svg") {
+                config.output_filename = format!("{}.svg", config.output_filename);
+            }
+        }
+    }
+    
     // Apply parsed values or use defaults
     let matrix = generate_qr_matrix(&config.url, &config);
     let version = calculate_version(&config.url, config.error_correction, config.data_mode);
-    matrix_to_png(&matrix, &config.output_filename)?;
+    save_matrix(&matrix, &config)?;
     
     let mask_status = if config.skip_mask { "skipped" } else { "applied" };
     println!("QR code saved to {} (Version {:?}) with mask pattern {:?} ({}) using {:?} mode", 
