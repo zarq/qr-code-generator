@@ -47,7 +47,6 @@ pub enum MaskPattern {
 }
 
 pub struct QrConfig {
-    pub version: Version,
     pub error_correction: ErrorCorrection,
     pub data_mode: DataMode,
     pub mask_pattern: MaskPattern,
@@ -60,7 +59,6 @@ pub struct QrConfig {
 impl Default for QrConfig {
     fn default() -> Self {
         Self {
-            version: Version::V3,
             error_correction: ErrorCorrection::M,
             data_mode: DataMode::Byte,
             mask_pattern: MaskPattern::Pattern0,

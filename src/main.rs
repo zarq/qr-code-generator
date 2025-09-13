@@ -260,9 +260,9 @@ fn add_dark_module(matrix: &mut Vec<Vec<u8>>, version: Version) {
     matrix[size - 7][8] = 1;
 }
 
-fn print_verbose_info(config: &QrConfig, encoded: &EncodedData) {
+fn print_verbose_info(config: &QrConfig, encoded: &EncodedData, version: Version) {
     println!("=== QR Code Metadata ===");
-    println!("Version: {:?} ({}x{})", config.version, config.version.size(), config.version.size());
+    println!("Version: {:?} ({}x{}) - Auto-calculated", version, version.size(), version.size());
     println!("Error Correction: {:?}", config.error_correction);
     println!("Data Mode: {:?}", config.data_mode);
     println!("Data Length: {} characters", config.url.len());
@@ -280,15 +280,52 @@ fn print_verbose_info(config: &QrConfig, encoded: &EncodedData) {
     println!();
 }
 
+fn calculate_version(data: &str, error_correction: ErrorCorrection, data_mode: DataMode) -> Version {
+    let data_length = data.len();
+    
+    // Capacity table for different versions and ECC levels (in characters)
+    let capacity = match (data_mode, error_correction) {
+        (DataMode::Byte, ErrorCorrection::L) => [17, 32, 53, 78, 106, 134, 154],
+        (DataMode::Byte, ErrorCorrection::M) => [14, 26, 42, 62, 84, 106, 122],
+        (DataMode::Byte, ErrorCorrection::Q) => [11, 20, 32, 46, 60, 74, 86],
+        (DataMode::Byte, ErrorCorrection::H) => [7, 14, 24, 34, 44, 58, 64],
+        (DataMode::Alphanumeric, ErrorCorrection::L) => [25, 47, 77, 114, 154, 195, 224],
+        (DataMode::Alphanumeric, ErrorCorrection::M) => [20, 38, 61, 90, 122, 154, 178],
+        (DataMode::Alphanumeric, ErrorCorrection::Q) => [16, 29, 47, 67, 87, 108, 125],
+        (DataMode::Alphanumeric, ErrorCorrection::H) => [10, 20, 35, 50, 64, 84, 93],
+        _ => [14, 26, 42, 62, 84, 106, 122], // Default to Byte M
+    };
+    
+    // Find minimum version that can hold the data
+    for (i, &cap) in capacity.iter().enumerate() {
+        if data_length <= cap {
+            return match i {
+                0 => Version::V1,
+                1 => Version::V2,
+                2 => Version::V3,
+                3 => Version::V4,
+                4 => Version::V5,
+                5 => Version::V6,
+                6 => Version::V7,
+                _ => Version::V7,
+            };
+        }
+    }
+    
+    Version::V7 // Fallback to largest supported version
+}
+
 fn generate_qr_matrix(url: &str, config: &QrConfig) -> Vec<Vec<u8>> {
-    let size = config.version.size();
+    // Calculate appropriate version based on data
+    let version = calculate_version(url, config.error_correction, config.data_mode);
+    let size = version.size();
     let mut matrix = vec![vec![0u8; size]; size];
     
     // Encode the data
-    let encoded = encode_data(url, config.version, config.error_correction, config.data_mode);
+    let encoded = encode_data(url, version, config.error_correction, config.data_mode);
     
     if config.verbose {
-        print_verbose_info(config, &encoded);
+        print_verbose_info(config, &encoded, version);
     }
     
     // Place the encoded data
@@ -308,7 +345,7 @@ fn generate_qr_matrix(url: &str, config: &QrConfig) -> Vec<Vec<u8>> {
     
     add_timing_patterns(&mut matrix, size);
     add_format_info(&mut matrix, config.error_correction, config.mask_pattern);
-    add_dark_module(&mut matrix, config.version);
+    add_dark_module(&mut matrix, version);
     
     matrix
 }
@@ -335,7 +372,6 @@ fn print_help(program_name: &str) {
     println!("Options:");
     println!("  --output, -o <file>        Output PNG file (default: qr-code.png)");
     println!("  --url, -u <url>            URL to encode (default: https://www.example.com/)");
-    println!("  --version, -v [1-7]        QR code version (default: 3)");
     println!("  --ecc-level, -l [L|M|Q|H]  Error correction level (default: M)");
     println!("  --mask-pattern, -mp [0-7]  Mask pattern (default: 0)");
     println!("  --skip-mask, -s            Skip mask application");
@@ -431,32 +467,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     std::process::exit(1);
                 }
             }
-            "--version" | "-v" => {
-                if i + 1 < args.len() {
-                    match args[i + 1].parse::<u8>() {
-                        Ok(v @ 1..=7) => {
-                            config.version = match v {
-                                1 => Version::V1,
-                                2 => Version::V2,
-                                3 => Version::V3,
-                                4 => Version::V4,
-                                5 => Version::V5,
-                                6 => Version::V6,
-                                7 => Version::V7,
-                                _ => unreachable!(),
-                            };
-                            i += 1;
-                        }
-                        _ => {
-                            eprintln!("Invalid version. Use 1-7.");
-                            std::process::exit(1);
-                        }
-                    }
-                } else {
-                    eprintln!("Version option requires a value.");
-                    std::process::exit(1);
-                }
-            }
             _ => {
                 eprintln!("Unknown argument: {}. Use --help for usage information.", args[i]);
                 std::process::exit(1);
@@ -467,10 +477,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Apply parsed values or use defaults
     let matrix = generate_qr_matrix(&config.url, &config);
+    let version = calculate_version(&config.url, config.error_correction, config.data_mode);
     matrix_to_png(&matrix, &config.output_filename)?;
     
     let mask_status = if config.skip_mask { "skipped" } else { "applied" };
     println!("QR code saved to {} (Version {:?}) with mask pattern {:?} ({}) using {:?} mode", 
-             config.output_filename, config.version, config.mask_pattern, mask_status, config.data_mode);
+             config.output_filename, version, config.mask_pattern, mask_status, config.data_mode);
     Ok(())
 }
