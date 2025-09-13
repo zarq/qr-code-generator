@@ -61,7 +61,7 @@ impl Default for QrConfig {
     fn default() -> Self {
         Self {
             version: Version::V3,
-            error_correction: ErrorCorrection::H,
+            error_correction: ErrorCorrection::M,
             data_mode: DataMode::Byte,
             mask_pattern: MaskPattern::Pattern0,
             skip_mask: false,

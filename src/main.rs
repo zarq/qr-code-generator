@@ -4,9 +4,11 @@ use std::env;
 mod types;
 mod mask;
 mod encoding;
+mod ecc;
 use types::{Version, ErrorCorrection, MaskPattern, DataMode, QrConfig};
 use mask::apply_mask;
 use encoding::{encode_data, EncodedData};
+use ecc::generate_ecc;
 
 fn add_position_pattern(matrix: &mut Vec<Vec<u8>>, x: usize, y: usize) {
     let size = matrix.len();
@@ -202,7 +204,7 @@ fn is_function_module(x: usize, y: usize, size: usize) -> bool {
 
 fn add_dark_module(matrix: &mut Vec<Vec<u8>>, version: Version) {
     let size = version.size();
-    matrix[(4 * version as usize) + 13][8] = 1;
+    matrix[size - 7][8] = 1;
 }
 
 fn print_verbose_info(config: &QrConfig, encoded: &EncodedData) {
@@ -281,6 +283,7 @@ fn print_help(program_name: &str) {
     println!("  --output, -o <file>        Output PNG file (default: qr-code.png)");
     println!("  --url, -u <url>            URL to encode (default: https://www.example.com/)");
     println!("  --version, -v [1-7]        QR code version (default: 3)");
+    println!("  --ecc-level, -l [L|M|Q|H]  Error correction level (default: M)");
     println!("  --mask-pattern, -mp [0-7]  Mask pattern (default: 0)");
     println!("  --skip-mask, -s            Skip mask application");
     println!("  --byte-mode, -b            Use byte mode encoding (default)");
@@ -356,6 +359,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--help" | "-h" => {
                 print_help(&args[0]);
                 return Ok(());
+            }
+            "--ecc-level" | "-l" => {
+                if i + 1 < args.len() {
+                    match args[i + 1].as_str() {
+                        "L" => config.error_correction = ErrorCorrection::L,
+                        "M" => config.error_correction = ErrorCorrection::M,
+                        "Q" => config.error_correction = ErrorCorrection::Q,
+                        "H" => config.error_correction = ErrorCorrection::H,
+                        _ => {
+                            eprintln!("Invalid ECC level. Use L, M, Q, or H.");
+                            std::process::exit(1);
+                        }
+                    }
+                    i += 1;
+                } else {
+                    eprintln!("ECC level option requires a value.");
+                    std::process::exit(1);
+                }
             }
             "--version" | "-v" => {
                 if i + 1 < args.len() {

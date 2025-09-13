@@ -1,4 +1,5 @@
 use crate::types::{DataMode, ErrorCorrection, Version};
+use crate::ecc::generate_ecc as generate_reed_solomon_ecc;
 
 pub struct EncodedData {
     pub data_bits: Vec<u8>,
@@ -81,8 +82,36 @@ fn alphanumeric_value(c: char) -> u16 {
     }
 }
 
-fn generate_ecc(_data_bits: &[u8], _version: Version, _error_correction: ErrorCorrection) -> Vec<u8> {
-    // Simplified ECC generation - just return zeros for now
-    let ecc_length = 136; // 17 bytes * 8 bits for Version 3, Error Correction H
-    vec![0; ecc_length]
+fn generate_ecc(data_bits: &[u8], version: Version, error_correction: ErrorCorrection) -> Vec<u8> {
+    // Convert bits to bytes
+    let mut data_bytes = Vec::new();
+    for chunk in data_bits.chunks(8) {
+        let mut byte = 0u8;
+        for (i, &bit) in chunk.iter().enumerate() {
+            byte |= bit << (7 - i);
+        }
+        data_bytes.push(byte);
+    }
+    
+    // Get ECC codewords count based on version and error correction level
+    let num_ecc_codewords = match (version, error_correction) {
+        (Version::V3, ErrorCorrection::L) => 7,
+        (Version::V3, ErrorCorrection::M) => 10,
+        (Version::V3, ErrorCorrection::Q) => 13,
+        (Version::V3, ErrorCorrection::H) => 17,
+        _ => 10, // Default fallback
+    };
+    
+    // Generate ECC using Reed-Solomon
+    let ecc_bytes = generate_reed_solomon_ecc(&data_bytes, num_ecc_codewords);
+    
+    // Convert ECC bytes back to bits
+    let mut ecc_bits = Vec::new();
+    for byte in ecc_bytes {
+        for i in 0..8 {
+            ecc_bits.push((byte >> (7 - i)) & 1);
+        }
+    }
+    
+    ecc_bits
 }
