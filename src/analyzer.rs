@@ -6,9 +6,18 @@ mod types;
 use types::{Version, ErrorCorrection, MaskPattern, DataMode};
 
 #[derive(Debug, Serialize)]
+struct BorderCheck {
+    has_border: bool,
+    border_width: usize,
+    valid: bool,
+}
+
+#[derive(Debug, Serialize)]
 struct QrAnalysis {
     status: String,
-    version: Option<Version>,
+    version_from_size: Option<Version>,
+    version_from_format: Option<Version>,
+    versions_match: bool,
     size: usize,
     error_correction: Option<ErrorCorrection>,
     data_mode: Option<DataMode>,
@@ -19,6 +28,7 @@ struct QrAnalysis {
     finder_patterns: Vec<FinderPattern>,
     timing_patterns: TimingPatterns,
     alignment_patterns: Vec<AlignmentPattern>,
+    border_check: BorderCheck,
     errors: Vec<String>,
     warnings: Vec<String>,
 }
@@ -28,6 +38,7 @@ struct FormatInfo {
     raw_bits: Option<String>,
     error_correction: Option<ErrorCorrection>,
     mask_pattern: Option<MaskPattern>,
+    version: Option<Version>,
 }
 
 #[derive(Debug, Serialize)]
@@ -73,20 +84,28 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
     }
     
     let size = width as usize;
-    let mut matrix = vec![vec![0u8; size]; size];
     
-    // Convert image to binary matrix
-    for y in 0..size {
-        for x in 0..size {
-            let pixel = rgb_img.get_pixel(x as u32, y as u32);
+    // Check for 2-pixel white border
+    let border_check = check_border(&rgb_img, size);
+    let inner_size = if border_check.valid { size - 4 } else { size };
+    let offset = if border_check.valid { 2 } else { 0 };
+    
+    let mut matrix = vec![vec![0u8; inner_size]; inner_size];
+    
+    // Convert image to binary matrix (skip border if present)
+    for y in 0..inner_size {
+        for x in 0..inner_size {
+            let pixel = rgb_img.get_pixel((x + offset) as u32, (y + offset) as u32);
             matrix[y][x] = if pixel[0] < 128 { 1 } else { 0 };
         }
     }
     
     let mut analysis = QrAnalysis {
         status: "success".to_string(),
-        version: None,
-        size,
+        version_from_size: None,
+        version_from_format: None,
+        versions_match: false,
+        size: inner_size,
         error_correction: None,
         data_mode: None,
         mask_pattern: None,
@@ -96,21 +115,24 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
             raw_bits: None,
             error_correction: None,
             mask_pattern: None,
+            version: None,
         },
         finder_patterns: Vec::new(),
         timing_patterns: TimingPatterns { valid: false },
         alignment_patterns: Vec::new(),
+        border_check,
         errors: Vec::new(),
         warnings: Vec::new(),
     };
     
     // Determine version from size
-    analysis.version = match size {
+    analysis.version_from_size = match inner_size {
         21 => Some(Version::V1),
         25 => Some(Version::V2),
         29 => Some(Version::V3),
+        33 => Some(Version::V4),
         _ => {
-            analysis.errors.push(format!("Unsupported QR code size: {}x{}", size, size));
+            analysis.errors.push(format!("Unsupported QR code size: {}x{}", inner_size, inner_size));
             None
         }
     };
@@ -122,22 +144,28 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
     analysis.timing_patterns = analyze_timing_patterns(&matrix);
     
     // Analyze format information
-    if let Some(format_info) = analyze_format_info(&matrix) {
+    if let Some(mut format_info) = analyze_format_info(&matrix) {
+        // For V1-V6, version is implicit from size, so use size-based version
+        format_info.version = analysis.version_from_size;
         analysis.format_info = format_info;
         analysis.error_correction = analysis.format_info.error_correction;
         analysis.mask_pattern = analysis.format_info.mask_pattern;
+        analysis.version_from_format = analysis.format_info.version;
     }
     
+    // Check if versions match
+    analysis.versions_match = analysis.version_from_size == analysis.version_from_format;
+    
     // Analyze alignment patterns (for V2+)
-    if let Some(version) = analysis.version {
-        if matches!(version, Version::V2 | Version::V3) {
+    if let Some(version) = analysis.version_from_size {
+        if matches!(version, Version::V2 | Version::V3 | Version::V4) {
             analysis.alignment_patterns = analyze_alignment_patterns(&matrix, version);
         }
     }
     
     // Try to decode data
     if let Some(mask) = analysis.mask_pattern {
-        if let Ok((mode, data)) = decode_data(&matrix, mask, analysis.version) {
+        if let Ok((mode, data)) = decode_data(&matrix, mask, analysis.version_from_size) {
             analysis.data_mode = Some(mode);
             analysis.decoded_text = Some(data.clone());
             analysis.raw_data = Some(data);
@@ -152,6 +180,45 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
     }
     
     Ok(analysis)
+}
+
+fn check_border(img: &image::RgbImage, size: usize) -> BorderCheck {
+    let mut has_border = true;
+    let border_width = 2;
+    
+    // Check top and bottom borders
+    for x in 0..size {
+        for y in 0..border_width {
+            let top_pixel = img.get_pixel(x as u32, y as u32);
+            let bottom_pixel = img.get_pixel(x as u32, (size - 1 - y) as u32);
+            if top_pixel[0] < 200 || bottom_pixel[0] < 200 {
+                has_border = false;
+                break;
+            }
+        }
+        if !has_border { break; }
+    }
+    
+    // Check left and right borders
+    if has_border {
+        for y in 0..size {
+            for x in 0..border_width {
+                let left_pixel = img.get_pixel(x as u32, y as u32);
+                let right_pixel = img.get_pixel((size - 1 - x) as u32, y as u32);
+                if left_pixel[0] < 200 || right_pixel[0] < 200 {
+                    has_border = false;
+                    break;
+                }
+            }
+            if !has_border { break; }
+        }
+    }
+    
+    BorderCheck {
+        has_border,
+        border_width: if has_border { border_width } else { 0 },
+        valid: has_border,
+    }
 }
 
 fn analyze_finder_patterns(matrix: &[Vec<u8>]) -> Vec<FinderPattern> {
@@ -246,12 +313,13 @@ fn analyze_format_info(matrix: &[Vec<u8>]) -> Option<FormatInfo> {
     
     // Decode format info
     let format_value = bits_to_u16(&bits);
-    let (ecc, mask) = decode_format_info(format_value);
+    let (ecc, mask, version) = decode_format_info(format_value);
     
     Some(FormatInfo {
         raw_bits: Some(raw_bits),
         error_correction: ecc,
         mask_pattern: mask,
+        version,
     })
 }
 
@@ -271,6 +339,13 @@ fn analyze_alignment_patterns(matrix: &[Vec<u8>], version: Version) -> Vec<Align
                 x: 20,
                 y: 20,
                 valid: check_alignment_pattern(matrix, 20, 20),
+            });
+        }
+        Version::V4 => {
+            patterns.push(AlignmentPattern {
+                x: 24,
+                y: 24,
+                valid: check_alignment_pattern(matrix, 24, 24),
             });
         }
         _ => {}
@@ -414,7 +489,7 @@ fn get_mask_bit(mask: MaskPattern, row: usize, col: usize) -> u8 {
     }
 }
 
-fn decode_format_info(format_value: u16) -> (Option<ErrorCorrection>, Option<MaskPattern>) {
+fn decode_format_info(format_value: u16) -> (Option<ErrorCorrection>, Option<MaskPattern>, Option<Version>) {
     let format_map = [
         (0b111011111000100, ErrorCorrection::L, MaskPattern::Pattern0),
         (0b111001011110011, ErrorCorrection::L, MaskPattern::Pattern1),
@@ -436,11 +511,11 @@ fn decode_format_info(format_value: u16) -> (Option<ErrorCorrection>, Option<Mas
     
     for &(value, ecc, mask) in &format_map {
         if value == format_value {
-            return (Some(ecc), Some(mask));
+            return (Some(ecc), Some(mask), None);
         }
     }
     
-    (None, None)
+    (None, None, None)
 }
 
 fn bits_to_u8(bits: &[u8]) -> u8 {
