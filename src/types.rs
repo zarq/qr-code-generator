@@ -24,7 +24,7 @@ impl Version {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum ErrorCorrection {
     L, // Low (~7%)
     M, // Medium (~15%)
@@ -55,6 +55,7 @@ pub struct QrConfig {
     pub skip_format_mask: bool,
     pub output_filename: String,
     pub url: String,
+    pub verbose: bool,
 }
 
 impl Default for QrConfig {
@@ -68,6 +69,7 @@ impl Default for QrConfig {
             skip_format_mask: false,
             output_filename: "qr-code.png".to_string(),
             url: "https://www.example.com/".to_string(),
+            verbose: false,
         }
     }
 }

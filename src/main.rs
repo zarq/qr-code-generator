@@ -206,12 +206,65 @@ fn add_dark_module(matrix: &mut Vec<Vec<u8>>, version: Version) {
     matrix[(4 * version as usize) + 13][8] = 1;
 }
 
+fn print_verbose_info(config: &QrConfig, encoded: &EncodedData) {
+    println!("=== QR Code Metadata ===");
+    println!("Version: {:?} ({}x{})", config.version, config.version.size(), config.version.size());
+    println!("Error Correction: {:?}", config.error_correction);
+    println!("Data Mode: {:?}", config.data_mode);
+    println!("Data Length: {} characters", config.url.len());
+    println!("Mask Pattern: {:?}", config.mask_pattern);
+    
+    println!("\n=== Format Information ===");
+    let format_bits = match config.error_correction {
+        ErrorCorrection::L => 0b01,
+        ErrorCorrection::M => 0b00,
+        ErrorCorrection::Q => 0b11,
+        ErrorCorrection::H => 0b10,
+    };
+    let mask_bits = match config.mask_pattern {
+        MaskPattern::Pattern0 => 0b000,
+        MaskPattern::Pattern1 => 0b001,
+        MaskPattern::Pattern2 => 0b010,
+        MaskPattern::Pattern3 => 0b011,
+        MaskPattern::Pattern4 => 0b100,
+        MaskPattern::Pattern5 => 0b101,
+        MaskPattern::Pattern6 => 0b110,
+        MaskPattern::Pattern7 => 0b111,
+    };
+    let data = (format_bits << 3) | mask_bits;
+    
+    // Calculate BCH ECC
+    let mut format_info = data << 10;
+    let generator = 0b10100110111;
+    for _ in 0..5 {
+        if (format_info & 0b100000000000000) != 0 {
+            format_info ^= generator;
+        }
+        format_info <<= 1;
+    }
+    let format_info = (data << 10) | (format_info >> 5);
+    
+    println!("Format bits (EC + Mask): {:05b}", data);
+    println!("Format info with ECC: {:015b}", format_info);
+    
+    println!("\n=== Data and ECC ===");
+    println!("Data bits ({} bits): {:?}", encoded.data_bits.len(), 
+             encoded.data_bits.iter().map(|&b| b.to_string()).collect::<Vec<_>>().join(""));
+    println!("ECC bits ({} bits): {:?}", encoded.ecc_bits.len(),
+             encoded.ecc_bits.iter().map(|&b| b.to_string()).collect::<Vec<_>>().join(""));
+    println!();
+}
+
 fn generate_qr_matrix(url: &str, config: &QrConfig) -> Vec<Vec<u8>> {
     let size = config.version.size();
     let mut matrix = vec![vec![0u8; size]; size];
     
     // Encode the data
     let encoded = encode_data(url, config.version, config.error_correction, config.data_mode);
+    
+    if config.verbose {
+        print_verbose_info(config, &encoded);
+    }
     
     // Place the encoded data
     place_data_bits(&mut matrix, &encoded);
@@ -268,7 +321,8 @@ fn print_help(program_name: &str) {
     println!("  --skip-format-mask, -sfm   Skip format mask application");
     println!("  --byte-mode, -b            Use byte mode encoding (default)");
     println!("  --alphanumeric-mode, -a    Use alphanumeric mode encoding");
-    println!("  --help, -h                 Show this help message");
+    println!("  --verbose, -V              Print detailed QR code information
+  --help, -h                 Show this help message");
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -335,6 +389,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--skip-format-mask" | "-sfm" => config.skip_format_mask = true,
             "--byte-mode" | "-b" => config.data_mode = DataMode::Byte,
             "--alphanumeric-mode" | "-a" => config.data_mode = DataMode::Alphanumeric,
+            "--verbose" | "-V" => config.verbose = true,
             "--help" | "-h" => {
                 print_help(&args[0]);
                 return Ok(());
