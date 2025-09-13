@@ -27,6 +27,7 @@ struct QrAnalysis {
     format_info: FormatInfo,
     finder_patterns: Vec<FinderPattern>,
     timing_patterns: TimingPatterns,
+    dark_module: DarkModule,
     alignment_patterns: Vec<AlignmentPattern>,
     border_check: BorderCheck,
     errors: Vec<String>,
@@ -50,6 +51,12 @@ struct FinderPattern {
 #[derive(Debug, Serialize)]
 struct TimingPatterns {
     valid: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct DarkModule {
+    present: bool,
+    position: (usize, usize),
 }
 
 #[derive(Debug, Serialize)]
@@ -119,6 +126,7 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
         },
         finder_patterns: Vec::new(),
         timing_patterns: TimingPatterns { valid: false },
+        dark_module: DarkModule { present: false, position: (0, 0) },
         alignment_patterns: Vec::new(),
         border_check,
         errors: Vec::new(),
@@ -142,6 +150,9 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
     
     // Analyze timing patterns
     analysis.timing_patterns = analyze_timing_patterns(&matrix);
+    
+    // Analyze dark module
+    analysis.dark_module = analyze_dark_module(&matrix);
     
     // Analyze format information
     if let Some(mut format_info) = analyze_format_info(&matrix) {
@@ -292,6 +303,18 @@ fn analyze_timing_patterns(matrix: &[Vec<u8>]) -> TimingPatterns {
     }
     
     TimingPatterns { valid }
+}
+
+fn analyze_dark_module(matrix: &[Vec<u8>]) -> DarkModule {
+    let size = matrix.len();
+    let row = size - 8;
+    let col = 8;
+    let present = matrix[row][col] == 1;
+    
+    DarkModule {
+        present,
+        position: (row, col),
+    }
 }
 
 fn analyze_format_info(matrix: &[Vec<u8>]) -> Option<FormatInfo> {
