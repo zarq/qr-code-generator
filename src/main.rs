@@ -141,17 +141,46 @@ fn add_format_info(matrix: &mut Vec<Vec<u8>>, error_correction: ErrorCorrection,
 }
 
 fn place_data_bits(matrix: &mut Vec<Vec<u8>>, encoded: &EncodedData) {
-    // Combine data and ECC bits
-    let mut all_bits = encoded.data_bits.clone();
-    all_bits.extend(&encoded.ecc_bits);
+    // Get block structure and interleave according to QR spec
+    let (data_blocks, ecc_blocks) = get_block_structure(&encoded.data_bits, &encoded.ecc_bits);
     
+    // Create interleaved bit stream
+    let mut bit_stream = Vec::new();
+    
+    // Interleave data blocks byte by byte
+    let max_data_bytes = data_blocks.iter().map(|b| b.len()).max().unwrap_or(0);
+    for byte_index in 0..max_data_bytes {
+        for block in &data_blocks {
+            if byte_index < block.len() {
+                // Convert byte to bits
+                for bit_pos in 0..8 {
+                    bit_stream.push((block[byte_index] >> (7 - bit_pos)) & 1);
+                }
+            }
+        }
+    }
+    
+    // Interleave ECC blocks byte by byte
+    let max_ecc_bytes = ecc_blocks.iter().map(|b| b.len()).max().unwrap_or(0);
+    for byte_index in 0..max_ecc_bytes {
+        for block in &ecc_blocks {
+            if byte_index < block.len() {
+                // Convert byte to bits
+                for bit_pos in 0..8 {
+                    bit_stream.push((block[byte_index] >> (7 - bit_pos)) & 1);
+                }
+            }
+        }
+    }
+    
+    // Place bits in zigzag pattern
     let size = matrix.len();
     let mut bit_index = 0;
     let mut up = true;
     
-    // Start from bottom-right, move in zigzag pattern
+    // Start from bottom-right, move left in 2-column strips
     let mut col = size - 1;
-    while col > 0 && bit_index < all_bits.len() {
+    while col > 0 && bit_index < bit_stream.len() {
         // Skip timing column
         if col == 6 {
             col -= 1;
@@ -164,8 +193,8 @@ fn place_data_bits(matrix: &mut Vec<Vec<u8>>, encoded: &EncodedData) {
             // Right column first, then left column
             for dx in 0..2 {
                 let x = col - dx;
-                if !is_function_module(x, y, size) && bit_index < all_bits.len() {
-                    matrix[y][x] = all_bits[bit_index];
+                if !is_function_module(x, y, size) && bit_index < bit_stream.len() {
+                    matrix[y][x] = bit_stream[bit_index];
                     bit_index += 1;
                 }
             }
@@ -174,6 +203,30 @@ fn place_data_bits(matrix: &mut Vec<Vec<u8>>, encoded: &EncodedData) {
         up = !up;
         col = col.saturating_sub(2);
     }
+}
+
+fn get_block_structure(data_bits: &[u8], ecc_bits: &[u8]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    // Convert bits to bytes
+    let data_bytes = bits_to_bytes(data_bits);
+    let ecc_bytes = bits_to_bytes(ecc_bits);
+    
+    // Version 3 uses 1 block for all ECC levels
+    let data_blocks = vec![data_bytes];
+    let ecc_blocks = vec![ecc_bytes];
+    
+    (data_blocks, ecc_blocks)
+}
+
+fn bits_to_bytes(bits: &[u8]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for chunk in bits.chunks(8) {
+        let mut byte = 0u8;
+        for (i, &bit) in chunk.iter().enumerate() {
+            byte |= bit << (7 - i);
+        }
+        bytes.push(byte);
+    }
+    bytes
 }
 
 fn is_function_module(x: usize, y: usize, size: usize) -> bool {
