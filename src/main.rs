@@ -73,51 +73,66 @@ fn add_timing_patterns(matrix: &mut Vec<Vec<u8>>, size: usize) {
     }
 }
 
-fn add_format_info(matrix: &mut Vec<Vec<u8>>, error_correction: ErrorCorrection, mask_pattern: MaskPattern) {
-    let format_bits = match error_correction {
-        ErrorCorrection::L => 0b01,
-        ErrorCorrection::M => 0b00,
-        ErrorCorrection::Q => 0b11,
-        ErrorCorrection::H => 0b10,
-    };
-    let mask_bits = match mask_pattern {
-        MaskPattern::Pattern0 => 0b000,
-        MaskPattern::Pattern1 => 0b001,
-        MaskPattern::Pattern2 => 0b010,
-        MaskPattern::Pattern3 => 0b011,
-        MaskPattern::Pattern4 => 0b100,
-        MaskPattern::Pattern5 => 0b101,
-        MaskPattern::Pattern6 => 0b110,
-        MaskPattern::Pattern7 => 0b111,
-    };
-    let data = (format_bits << 3) | mask_bits;
-    
-    // Calculate BCH(15,5) error correction for format info
-    let mut format_info = data << 10;
-    let generator = 0b10100110111; // x^10 + x^8 + x^5 + x^4 + x^2 + x + 1
-    
-    for _ in 0..5 {
-        if (format_info & 0b100000000000000) != 0 {
-            format_info ^= generator;
-        }
-        format_info <<= 1;
+fn get_format_info(error_correction: ErrorCorrection, mask_pattern: MaskPattern) -> u16 {
+    // Format info lookup table from https://www.thonky.com/qr-code-tutorial/format-version-tables
+    match (error_correction, mask_pattern) {
+        (ErrorCorrection::L, MaskPattern::Pattern0) => 0b111011111000100,
+        (ErrorCorrection::L, MaskPattern::Pattern1) => 0b111001011110011,
+        (ErrorCorrection::L, MaskPattern::Pattern2) => 0b111110110101010,
+        (ErrorCorrection::L, MaskPattern::Pattern3) => 0b111100010011101,
+        (ErrorCorrection::L, MaskPattern::Pattern4) => 0b110011000101111,
+        (ErrorCorrection::L, MaskPattern::Pattern5) => 0b110001100011000,
+        (ErrorCorrection::L, MaskPattern::Pattern6) => 0b110110001000001,
+        (ErrorCorrection::L, MaskPattern::Pattern7) => 0b110100101110110,
+        (ErrorCorrection::M, MaskPattern::Pattern0) => 0b101010000010010,
+        (ErrorCorrection::M, MaskPattern::Pattern1) => 0b101000100100101,
+        (ErrorCorrection::M, MaskPattern::Pattern2) => 0b101111001111100,
+        (ErrorCorrection::M, MaskPattern::Pattern3) => 0b101101101001011,
+        (ErrorCorrection::M, MaskPattern::Pattern4) => 0b100010111111001,
+        (ErrorCorrection::M, MaskPattern::Pattern5) => 0b100000011001110,
+        (ErrorCorrection::M, MaskPattern::Pattern6) => 0b100111110010111,
+        (ErrorCorrection::M, MaskPattern::Pattern7) => 0b100101010100000,
+        (ErrorCorrection::Q, MaskPattern::Pattern0) => 0b011010101011111,
+        (ErrorCorrection::Q, MaskPattern::Pattern1) => 0b011000001101000,
+        (ErrorCorrection::Q, MaskPattern::Pattern2) => 0b011111100110001,
+        (ErrorCorrection::Q, MaskPattern::Pattern3) => 0b011101000000110,
+        (ErrorCorrection::Q, MaskPattern::Pattern4) => 0b010010010110100,
+        (ErrorCorrection::Q, MaskPattern::Pattern5) => 0b010000110000011,
+        (ErrorCorrection::Q, MaskPattern::Pattern6) => 0b010111011011010,
+        (ErrorCorrection::Q, MaskPattern::Pattern7) => 0b010101111101101,
+        (ErrorCorrection::H, MaskPattern::Pattern0) => 0b001011010001001,
+        (ErrorCorrection::H, MaskPattern::Pattern1) => 0b001001110111110,
+        (ErrorCorrection::H, MaskPattern::Pattern2) => 0b001110011100111,
+        (ErrorCorrection::H, MaskPattern::Pattern3) => 0b001100111010000,
+        (ErrorCorrection::H, MaskPattern::Pattern4) => 0b000011101100010,
+        (ErrorCorrection::H, MaskPattern::Pattern5) => 0b000001001010101,
+        (ErrorCorrection::H, MaskPattern::Pattern6) => 0b000110100001100,
+        (ErrorCorrection::H, MaskPattern::Pattern7) => 0b000100000111011,
     }
-    
-    let format_info = (data << 10) | (format_info >> 5);
+}
+
+fn add_format_info(matrix: &mut Vec<Vec<u8>>, error_correction: ErrorCorrection, mask_pattern: MaskPattern) {
+    let format_info = get_format_info(error_correction, mask_pattern);
     
     // Top-left format info (around position pattern)
+    // Horizontal: bits 14-9 (leftmost 6 bits)
     for i in 0..6 {
-        matrix[8][i] = ((format_info >> i) & 1) as u8;
+        matrix[8][i] = ((format_info >> (14 - i)) & 1) as u8;
+    }
+    // Vertical: bits 5-0 (rightmost 6 bits)
+    for i in 0..6 {
         matrix[i][8] = ((format_info >> i) & 1) as u8;
     }
-    matrix[8][7] = ((format_info >> 6) & 1) as u8;
-    matrix[8][8] = ((format_info >> 7) & 1) as u8;
+    // Special positions
+    matrix[8][7] = ((format_info >> 8) & 1) as u8;  // bit 8
+    matrix[8][8] = ((format_info >> 7) & 1) as u8;  // bit 7
+    matrix[7][8] = ((format_info >> 6) & 1) as u8;  // bit 6
     
     // Top-right and bottom-left format info
     let size = matrix.len();
     for i in 0..7 {
         matrix[8][size - 1 - i] = ((format_info >> i) & 1) as u8;
-        matrix[size - 1 - i][8] = ((format_info >> i) & 1) as u8;
+        matrix[size - 1 - i][8] = ((format_info >> (6 - i)) & 1) as u8;
     }
 }
 
@@ -182,24 +197,6 @@ fn is_function_module(x: usize, y: usize, size: usize) -> bool {
     false
 }
 
-fn apply_format_mask(matrix: &mut Vec<Vec<u8>>) {
-    let format_mask = 0b101010000010010; // Fixed format mask pattern
-    let size = matrix.len();
-    
-    // Top-left format info
-    for i in 0..6 {
-        matrix[8][i] ^= ((format_mask >> i) & 1) as u8;
-        matrix[i][8] ^= ((format_mask >> i) & 1) as u8;
-    }
-    matrix[8][7] ^= ((format_mask >> 6) & 1) as u8;
-    matrix[8][8] ^= ((format_mask >> 7) & 1) as u8;
-    
-    // Top-right and bottom-left format info
-    for i in 0..7 {
-        matrix[8][size - 1 - i] ^= ((format_mask >> i) & 1) as u8;
-        matrix[size - 1 - i][8] ^= ((format_mask >> i) & 1) as u8;
-    }
-}
 
 fn add_dark_module(matrix: &mut Vec<Vec<u8>>, version: Version) {
     let size = version.size();
@@ -215,36 +212,7 @@ fn print_verbose_info(config: &QrConfig, encoded: &EncodedData) {
     println!("Mask Pattern: {:?}", config.mask_pattern);
     
     println!("\n=== Format Information ===");
-    let format_bits = match config.error_correction {
-        ErrorCorrection::L => 0b01,
-        ErrorCorrection::M => 0b00,
-        ErrorCorrection::Q => 0b11,
-        ErrorCorrection::H => 0b10,
-    };
-    let mask_bits = match config.mask_pattern {
-        MaskPattern::Pattern0 => 0b000,
-        MaskPattern::Pattern1 => 0b001,
-        MaskPattern::Pattern2 => 0b010,
-        MaskPattern::Pattern3 => 0b011,
-        MaskPattern::Pattern4 => 0b100,
-        MaskPattern::Pattern5 => 0b101,
-        MaskPattern::Pattern6 => 0b110,
-        MaskPattern::Pattern7 => 0b111,
-    };
-    let data = (format_bits << 3) | mask_bits;
-    
-    // Calculate BCH ECC
-    let mut format_info = data << 10;
-    let generator = 0b10100110111;
-    for _ in 0..5 {
-        if (format_info & 0b100000000000000) != 0 {
-            format_info ^= generator;
-        }
-        format_info <<= 1;
-    }
-    let format_info = (data << 10) | (format_info >> 5);
-    
-    println!("Format bits (EC + Mask): {:05b}", data);
+    let format_info = get_format_info(config.error_correction, config.mask_pattern);
     println!("Format info with ECC: {:015b}", format_info);
     
     println!("\n=== Data and ECC ===");
@@ -283,11 +251,6 @@ fn generate_qr_matrix(url: &str, config: &QrConfig) -> Vec<Vec<u8>> {
     
     add_timing_patterns(&mut matrix, size);
     add_format_info(&mut matrix, config.error_correction, config.mask_pattern);
-    
-    if !config.skip_format_mask {
-        apply_format_mask(&mut matrix);
-    }
-    
     add_dark_module(&mut matrix, config.version);
     
     matrix
@@ -318,7 +281,6 @@ fn print_help(program_name: &str) {
     println!("  --version, -v [1-7]        QR code version (default: 3)");
     println!("  --mask-pattern, -mp [0-7]  Mask pattern (default: 0)");
     println!("  --skip-mask, -s            Skip mask application");
-    println!("  --skip-format-mask, -sfm   Skip format mask application");
     println!("  --byte-mode, -b            Use byte mode encoding (default)");
     println!("  --alphanumeric-mode, -a    Use alphanumeric mode encoding");
     println!("  --verbose, -V              Print detailed QR code information
@@ -386,7 +348,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "--skip-mask" | "-s" => config.skip_mask = true,
-            "--skip-format-mask" | "-sfm" => config.skip_format_mask = true,
             "--byte-mode" | "-b" => config.data_mode = DataMode::Byte,
             "--alphanumeric-mode" | "-a" => config.data_mode = DataMode::Alphanumeric,
             "--verbose" | "-V" => config.verbose = true,
@@ -433,8 +394,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     matrix_to_png(&matrix, &config.output_filename)?;
     
     let mask_status = if config.skip_mask { "skipped" } else { "applied" };
-    let format_mask_status = if config.skip_format_mask { "skipped" } else { "applied" };
-    println!("QR code saved to {} (Version {:?}) with mask pattern {:?} ({}) and format mask ({}) using {:?} mode", 
-             config.output_filename, config.version, config.mask_pattern, mask_status, format_mask_status, config.data_mode);
+    println!("QR code saved to {} (Version {:?}) with mask pattern {:?} ({}) using {:?} mode", 
+             config.output_filename, config.version, config.mask_pattern, mask_status, config.data_mode);
     Ok(())
 }
