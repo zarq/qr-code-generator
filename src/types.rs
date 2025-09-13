@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize)]
 pub enum Version {
     V1, V2, V3, V4, V5, V6, V7, V8, V9, V10,
     V11, V12, V13, V14, V15, V16, V17, V18, V19, V20,
@@ -24,7 +24,7 @@ impl Version {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize)]
 pub enum ErrorCorrection {
     L, // Low (~7%)
     M, // Medium (~15%)
@@ -32,14 +32,14 @@ pub enum ErrorCorrection {
     H, // High (~30%)
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize)]
 pub enum DataMode {
     Numeric,
     Alphanumeric,
     Byte,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize)]
 pub enum MaskPattern {
     Pattern0, Pattern1, Pattern2, Pattern3,
     Pattern4, Pattern5, Pattern6, Pattern7,
