@@ -239,9 +239,12 @@ fn is_function_module(x: usize, y: usize, size: usize) -> bool {
         return true;
     }
     
-    // Alignment pattern (for Version 3)
-    if size > 25 && x >= size - 9 && x < size - 4 && y >= size - 9 && y < size - 4 {
-        return true;
+    // Alignment pattern (for Version 2+)
+    if size > 21 {
+        let center = size - 7;
+        if x >= center - 2 && x <= center + 2 && y >= center - 2 && y <= center + 2 {
+            return true;
+        }
     }
     
     // Format info areas

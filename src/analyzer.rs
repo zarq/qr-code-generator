@@ -669,6 +669,14 @@ fn is_function_module(row: usize, col: usize, size: usize) -> bool {
         return true;
     }
     
+    // Alignment patterns (for V2+)
+    if size > 21 {
+        let center = size - 7;
+        if (row >= center - 2 && row <= center + 2) && (col >= center - 2 && col <= center + 2) {
+            return true;
+        }
+    }
+    
     false
 }
 
