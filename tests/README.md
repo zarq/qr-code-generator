@@ -44,6 +44,9 @@ Each test validates:
 - ✅ `status == "success"`
 - ✅ `versions_match == true` 
 - ✅ `border_check.valid == true`
+- ✅ `format_info.copies_match == true`
+- ✅ `dark_module.present == true`
+- ✅ `timing_patterns.valid == true`
 - ✅ Structural integrity (finder patterns, timing patterns)
 
 ## Generated Files

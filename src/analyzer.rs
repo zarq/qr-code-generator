@@ -36,7 +36,9 @@ struct QrAnalysis {
 
 #[derive(Debug, Serialize)]
 struct FormatInfo {
-    raw_bits: Option<String>,
+    raw_bits_copy1: Option<String>,
+    raw_bits_copy2: Option<String>,
+    copies_match: bool,
     error_correction: Option<ErrorCorrection>,
     mask_pattern: Option<MaskPattern>,
     version: Option<Version>,
@@ -119,7 +121,9 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
         raw_data: None,
         decoded_text: None,
         format_info: FormatInfo {
-            raw_bits: None,
+            raw_bits_copy1: None,
+            raw_bits_copy2: None,
+            copies_match: false,
             error_correction: None,
             mask_pattern: None,
             version: None,
@@ -319,30 +323,54 @@ fn analyze_dark_module(matrix: &[Vec<u8>]) -> DarkModule {
 
 fn analyze_format_info(matrix: &[Vec<u8>]) -> Option<FormatInfo> {
     let size = matrix.len();
-    let mut bits = Vec::new();
     
-    // Read format info from around top-left finder pattern
+    // Read format info copy 1 (around top-left finder pattern)
+    let mut bits1 = Vec::new();
+    // Horizontal part: positions (8,0) to (8,5)
     for i in 0..6 {
-        bits.push(matrix[8][i]);
+        bits1.push(matrix[8][i]);
     }
-    bits.push(matrix[8][7]);
-    bits.push(matrix[8][8]);
-    bits.push(matrix[7][8]);
+    // Skip timing pattern at (8,6)
+    // Position (8,7)
+    bits1.push(matrix[8][7]);
+    // Position (8,8) 
+    bits1.push(matrix[8][8]);
+    // Vertical part: positions (7,8) down to (0,8)
+    bits1.push(matrix[7][8]);
     for i in (0..6).rev() {
-        bits.push(matrix[i][8]);
+        bits1.push(matrix[i][8]);
     }
     
-    let raw_bits = bits.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>();
+    // Read format info copy 2 (split between top-right and bottom-left)
+    let mut bits2 = Vec::new();
+    // Bottom-left part first: positions (size-1, 8) to (size-7, 8) - reading bottom to top, skip dark module
+    for i in (size-7..size).rev() {
+        if i != size - 8 { // Skip dark module position
+            bits2.push(matrix[i][8]);
+        }
+    }
+    // Add the shared bit at (8,8)
+    bits2.push(matrix[8][8]);
+    // Top-right part: positions (8, size-7) to (8, size-1) - reading left to right
+    for i in size-7..size {
+        bits2.push(matrix[8][i]);
+    }
     
-    // Decode format info
-    let format_value = bits_to_u16(&bits);
-    let (ecc, mask, version) = decode_format_info(format_value);
+    let raw_bits1 = bits1.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>();
+    let raw_bits2 = bits2.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>();
+    let copies_match = raw_bits1 == raw_bits2;
+    
+    // Decode format info from copy 1
+    let format_value = bits_to_u16(&bits1);
+    let (ecc, mask, _) = decode_format_info(format_value);
     
     Some(FormatInfo {
-        raw_bits: Some(raw_bits),
+        raw_bits_copy1: Some(raw_bits1),
+        raw_bits_copy2: Some(raw_bits2),
+        copies_match,
         error_correction: ecc,
         mask_pattern: mask,
-        version,
+        version: None,
     })
 }
 

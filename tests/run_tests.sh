@@ -54,13 +54,17 @@ run_test() {
     local status=$(jq -r '.status' "$GENERATED_DIR/${test_name}.json" 2>/dev/null)
     local versions_match=$(jq -r '.versions_match' "$GENERATED_DIR/${test_name}.json" 2>/dev/null)
     local border_valid=$(jq -r '.border_check.valid' "$GENERATED_DIR/${test_name}.json" 2>/dev/null)
+    local format_copies_match=$(jq -r '.format_info.copies_match' "$GENERATED_DIR/${test_name}.json" 2>/dev/null)
+    local dark_module_present=$(jq -r '.dark_module.present' "$GENERATED_DIR/${test_name}.json" 2>/dev/null)
+    local timing_patterns_valid=$(jq -r '.timing_patterns.valid' "$GENERATED_DIR/${test_name}.json" 2>/dev/null)
     
-    if [ "$status" = "success" ] && [ "$versions_match" = "true" ] && [ "$border_valid" = "true" ]; then
+    if [ "$status" = "success" ] && [ "$versions_match" = "true" ] && [ "$border_valid" = "true" ] && [ "$format_copies_match" = "true" ] && [ "$dark_module_present" = "true" ] && [ "$timing_patterns_valid" = "true" ]; then
         echo -e "${GREEN}PASS${NC}"
         TESTS_PASSED=$((TESTS_PASSED + 1))
     else
         echo -e "${RED}FAIL (validation)${NC}"
         echo "  Status: $status, Versions match: $versions_match, Border valid: $border_valid"
+        echo "  Format copies match: $format_copies_match, Dark module: $dark_module_present, Timing patterns: $timing_patterns_valid"
         TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
 }
