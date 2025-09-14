@@ -1,4 +1,5 @@
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+#[allow(dead_code)]
 pub enum Version {
     V1, V2, V3, V4, V5, V6, V7, V8, V9, V10,
     V11, V12, V13, V14, V15, V16, V17, V18, V19, V20,
@@ -7,6 +8,7 @@ pub enum Version {
 }
 
 impl Version {
+    #[allow(dead_code)]
     pub fn size(&self) -> usize {
         match self {
             Version::V1 => 21,
@@ -46,11 +48,13 @@ pub enum MaskPattern {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub enum OutputFormat {
     Png,
     Svg,
 }
 
+#[allow(dead_code)]
 pub struct QrConfig {
     pub error_correction: ErrorCorrection,
     pub data_mode: DataMode,

@@ -72,10 +72,11 @@ struct DataAnalysis {
     data_length: Option<usize>,
     extracted_data: Option<String>,
     ecc_bits: Option<String>,
+    padding_bits: Option<String>,
     data_ecc_valid: bool,
     data_size: Option<usize>,
     bit_string_size: Option<usize>,
-    padding_bits: Option<usize>,
+    terminator_bits: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -153,10 +154,11 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
             data_length: None,
             extracted_data: None,
             ecc_bits: None,
+            padding_bits: None,
             data_ecc_valid: false,
             data_size: None,
             bit_string_size: None,
-            padding_bits: None,
+            terminator_bits: None,
         },
         finder_patterns: Vec::new(),
         timing_patterns: TimingPatterns { valid: false },
@@ -484,10 +486,11 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
             data_length: None,
             extracted_data: None,
             ecc_bits: None,
+            padding_bits: None,
             data_ecc_valid: false,
             data_size: None,
             bit_string_size: Some(raw_bits.len()),
-            padding_bits: None,
+            terminator_bits: None,
         };
     }
     
@@ -532,19 +535,46 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
     let total_capacity = get_total_capacity(version, ecc_level);
     let data_capacity = get_data_capacity(version, ecc_level);
     
-    let ecc_start = data_capacity.unwrap_or(unmasked_bits.len());
-    let ecc_bits = if ecc_start < unmasked_bits.len() {
-        Some(unmasked_bits[ecc_start..std::cmp::min(ecc_start + (total_capacity.unwrap_or(unmasked_bits.len()) - data_capacity.unwrap_or(0)), unmasked_bits.len())]
+    // Calculate actual boundaries based on unmasked_bits length
+    let total_bits_available = unmasked_bits.len();
+    let data_capacity_bits = data_capacity.unwrap_or(total_bits_available);
+    let total_capacity_bits = total_capacity.unwrap_or(total_bits_available);
+    let ecc_bits_expected = if total_capacity_bits > data_capacity_bits {
+        total_capacity_bits - data_capacity_bits
+    } else {
+        // Fallback: assume last 25% of bits are ECC if we can't determine capacity
+        total_bits_available / 4
+    };
+    
+    // Extract padding bits (between actual data and data capacity)
+    let padding_start = data_end;
+    let padding_end = std::cmp::min(data_capacity_bits, total_bits_available);
+    let padding_bits = if padding_end > padding_start {
+        Some(unmasked_bits[padding_start..padding_end]
             .iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>())
     } else {
         None
     };
     
-    let padding_bits = if data_end < ecc_start {
-        Some(ecc_start - data_end)
+    // Extract ECC bits (last ecc_bits_expected bits)
+    let ecc_start = total_bits_available.saturating_sub(ecc_bits_expected);
+    let ecc_end = total_bits_available;
+    let ecc_bits = if ecc_end > ecc_start && ecc_bits_expected > 0 {
+        Some(unmasked_bits[ecc_start..ecc_end]
+            .iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>())
     } else {
         None
     };
+    
+    // Count terminator bits (zeros immediately after data)
+    let mut terminator_count = 0;
+    for i in data_end..std::cmp::min(data_end + 4, padding_end) {
+        if i < unmasked_bits.len() && unmasked_bits[i] == 0 {
+            terminator_count += 1;
+        } else {
+            break;
+        }
+    }
     
     let data_ecc_valid = if let (Some(data_cap), Some(total_cap)) = (data_capacity, total_capacity) {
         validate_ecc(&unmasked_bits, data_cap, total_cap - data_cap, ecc_level)
@@ -560,10 +590,11 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
         data_length,
         extracted_data,
         ecc_bits,
+        padding_bits,
         data_ecc_valid,
         data_size: data_length,
         bit_string_size: Some(raw_bits.len()),
-        padding_bits,
+        terminator_bits: Some(terminator_count),
     }
 }
 
@@ -572,14 +603,42 @@ fn read_data_bits(matrix: &[Vec<u8>], size: usize) -> Vec<u8> {
     let mut col = size - 1;
     let mut going_up = true;
     
-    while col > 0 {
+    // Determine version from size and calculate capacity
+    let version = match size {
+        21 => Some(Version::V1),
+        25 => Some(Version::V2),
+        29 => Some(Version::V3),
+        33 => Some(Version::V4),
+        37 => Some(Version::V5),
+        41 => Some(Version::V6),
+        45 => Some(Version::V7),
+        49 => Some(Version::V8),
+        53 => Some(Version::V9),
+        57 => Some(Version::V10),
+        _ => None,
+    };
+    
+    // Use minimum total capacity for the version (H level has lowest total capacity)
+    let max_bits = match size {
+        21 => 208,  // V1: all ECC levels have same total
+        25 => 304,  // V2: minimum is M level
+        29 => 344,  // V3: minimum is H level  
+        33 => 592,  // V4: minimum is M level
+        37 => 1232, // V5: minimum is H level
+        41 => 1568, // V6: minimum is H level
+        _ => usize::MAX,
+    };
+    
+    while col > 0 && bits.len() < max_bits {
         if col == 6 { col -= 1; } // Skip timing column
         
         if going_up {
             // Read from bottom to top
             for row in (0..size).rev() {
+                if bits.len() >= max_bits { break; }
                 // Read right column first, then left column
                 for offset in [0, 1] {
+                    if bits.len() >= max_bits { break; }
                     if col >= offset {
                         let c = col - offset;
                         if !is_function_module(row, c, size) {
@@ -591,8 +650,10 @@ fn read_data_bits(matrix: &[Vec<u8>], size: usize) -> Vec<u8> {
         } else {
             // Read from top to bottom
             for row in 0..size {
+                if bits.len() >= max_bits { break; }
                 // Read right column first, then left column
                 for offset in [0, 1] {
+                    if bits.len() >= max_bits { break; }
                     if col >= offset {
                         let c = col - offset;
                         if !is_function_module(row, c, size) {
@@ -610,6 +671,7 @@ fn read_data_bits(matrix: &[Vec<u8>], size: usize) -> Vec<u8> {
     bits
 }
 
+#[allow(dead_code)]
 fn apply_mask_to_bits(bits: &[u8], mask: MaskPattern, size: usize) -> Vec<u8> {
     let mut unmasked_bits = Vec::new();
     let mut bit_index = 0;
@@ -680,6 +742,7 @@ fn is_function_module(row: usize, col: usize, size: usize) -> bool {
     false
 }
 
+#[allow(dead_code)]
 fn apply_mask_to_bit(bit: u8, row: usize, col: usize, mask: MaskPattern) -> u8 {
     let mask_value = match mask {
         MaskPattern::Pattern0 => (row + col) % 2 == 0,
@@ -759,23 +822,237 @@ fn decode_byte_bits(bits: &[u8]) -> Option<String> {
     Some(result)
 }
 
-fn get_total_capacity(version: Option<Version>, _ecc: Option<ErrorCorrection>) -> Option<usize> {
-    match version? {
-        Version::V1 => Some(208),
-        Version::V2 => Some(359),
-        Version::V3 => Some(567),
-        Version::V4 => Some(807),
-        _ => None,
-    }
+fn get_total_capacity(version: Option<Version>, ecc: Option<ErrorCorrection>) -> Option<usize> {
+    let data_cap = get_data_capacity(version, ecc)?;
+    // Use actual ECC bit counts from QR standard
+    let ecc_cap = match (version?, ecc?) {
+        // Version 1
+        (Version::V1, ErrorCorrection::L) => 56,
+        (Version::V1, ErrorCorrection::M) => 80,
+        (Version::V1, ErrorCorrection::Q) => 104,
+        (Version::V1, ErrorCorrection::H) => 136,
+        // Version 2  
+        (Version::V2, ErrorCorrection::L) => 88,
+        (Version::V2, ErrorCorrection::M) => 80,
+        (Version::V2, ErrorCorrection::Q) => 184,
+        (Version::V2, ErrorCorrection::H) => 232,
+        // Version 3
+        (Version::V3, ErrorCorrection::L) => 112,
+        (Version::V3, ErrorCorrection::M) => 200,
+        (Version::V3, ErrorCorrection::Q) => 280,
+        (Version::V3, ErrorCorrection::H) => 136,
+        // Version 4
+        (Version::V4, ErrorCorrection::L) => 112,
+        (Version::V4, ErrorCorrection::M) => 80,
+        (Version::V4, ErrorCorrection::Q) => 208,
+        (Version::V4, ErrorCorrection::H) => 304,
+        _ => 80,
+    };
+    Some(data_cap + ecc_cap)
 }
 
 fn get_data_capacity(version: Option<Version>, ecc: Option<ErrorCorrection>) -> Option<usize> {
     match (version?, ecc?) {
+        // Version 1
         (Version::V1, ErrorCorrection::L) => Some(152),
         (Version::V1, ErrorCorrection::M) => Some(128),
         (Version::V1, ErrorCorrection::Q) => Some(104),
         (Version::V1, ErrorCorrection::H) => Some(72),
-        _ => Some(128),
+        // Version 2
+        (Version::V2, ErrorCorrection::L) => Some(272),
+        (Version::V2, ErrorCorrection::M) => Some(224),
+        (Version::V2, ErrorCorrection::Q) => Some(176),
+        (Version::V2, ErrorCorrection::H) => Some(128),
+        // Version 3
+        (Version::V3, ErrorCorrection::L) => Some(440),
+        (Version::V3, ErrorCorrection::M) => Some(352),
+        (Version::V3, ErrorCorrection::Q) => Some(272),
+        (Version::V3, ErrorCorrection::H) => Some(208),
+        // Version 4
+        (Version::V4, ErrorCorrection::L) => Some(640),
+        (Version::V4, ErrorCorrection::M) => Some(512),
+        (Version::V4, ErrorCorrection::Q) => Some(384),
+        (Version::V4, ErrorCorrection::H) => Some(288),
+        // Version 5
+        (Version::V5, ErrorCorrection::L) => Some(864),
+        (Version::V5, ErrorCorrection::M) => Some(688),
+        (Version::V5, ErrorCorrection::Q) => Some(496),
+        (Version::V5, ErrorCorrection::H) => Some(368),
+        // Version 6
+        (Version::V6, ErrorCorrection::L) => Some(1088),
+        (Version::V6, ErrorCorrection::M) => Some(864),
+        (Version::V6, ErrorCorrection::Q) => Some(608),
+        (Version::V6, ErrorCorrection::H) => Some(480),
+        // Version 7
+        (Version::V7, ErrorCorrection::L) => Some(1248),
+        (Version::V7, ErrorCorrection::M) => Some(992),
+        (Version::V7, ErrorCorrection::Q) => Some(704),
+        (Version::V7, ErrorCorrection::H) => Some(528),
+        // Version 8
+        (Version::V8, ErrorCorrection::L) => Some(1552),
+        (Version::V8, ErrorCorrection::M) => Some(1232),
+        (Version::V8, ErrorCorrection::Q) => Some(880),
+        (Version::V8, ErrorCorrection::H) => Some(688),
+        // Version 9
+        (Version::V9, ErrorCorrection::L) => Some(1856),
+        (Version::V9, ErrorCorrection::M) => Some(1456),
+        (Version::V9, ErrorCorrection::Q) => Some(1056),
+        (Version::V9, ErrorCorrection::H) => Some(800),
+        // Version 10
+        (Version::V10, ErrorCorrection::L) => Some(2192),
+        (Version::V10, ErrorCorrection::M) => Some(1728),
+        (Version::V10, ErrorCorrection::Q) => Some(1232),
+        (Version::V10, ErrorCorrection::H) => Some(976),
+        // Version 11
+        (Version::V11, ErrorCorrection::L) => Some(2592),
+        (Version::V11, ErrorCorrection::M) => Some(2032),
+        (Version::V11, ErrorCorrection::Q) => Some(1440),
+        (Version::V11, ErrorCorrection::H) => Some(1120),
+        // Version 12
+        (Version::V12, ErrorCorrection::L) => Some(2960),
+        (Version::V12, ErrorCorrection::M) => Some(2320),
+        (Version::V12, ErrorCorrection::Q) => Some(1648),
+        (Version::V12, ErrorCorrection::H) => Some(1264),
+        // Version 13
+        (Version::V13, ErrorCorrection::L) => Some(3424),
+        (Version::V13, ErrorCorrection::M) => Some(2672),
+        (Version::V13, ErrorCorrection::Q) => Some(1952),
+        (Version::V13, ErrorCorrection::H) => Some(1440),
+        // Version 14
+        (Version::V14, ErrorCorrection::L) => Some(3688),
+        (Version::V14, ErrorCorrection::M) => Some(2920),
+        (Version::V14, ErrorCorrection::Q) => Some(2088),
+        (Version::V14, ErrorCorrection::H) => Some(1576),
+        // Version 15
+        (Version::V15, ErrorCorrection::L) => Some(4184),
+        (Version::V15, ErrorCorrection::M) => Some(3320),
+        (Version::V15, ErrorCorrection::Q) => Some(2360),
+        (Version::V15, ErrorCorrection::H) => Some(1784),
+        // Version 16
+        (Version::V16, ErrorCorrection::L) => Some(4712),
+        (Version::V16, ErrorCorrection::M) => Some(3624),
+        (Version::V16, ErrorCorrection::Q) => Some(2600),
+        (Version::V16, ErrorCorrection::H) => Some(2024),
+        // Version 17
+        (Version::V17, ErrorCorrection::L) => Some(5176),
+        (Version::V17, ErrorCorrection::M) => Some(4056),
+        (Version::V17, ErrorCorrection::Q) => Some(2936),
+        (Version::V17, ErrorCorrection::H) => Some(2264),
+        // Version 18
+        (Version::V18, ErrorCorrection::L) => Some(5768),
+        (Version::V18, ErrorCorrection::M) => Some(4504),
+        (Version::V18, ErrorCorrection::Q) => Some(3176),
+        (Version::V18, ErrorCorrection::H) => Some(2504),
+        // Version 19
+        (Version::V19, ErrorCorrection::L) => Some(6360),
+        (Version::V19, ErrorCorrection::M) => Some(5016),
+        (Version::V19, ErrorCorrection::Q) => Some(3560),
+        (Version::V19, ErrorCorrection::H) => Some(2728),
+        // Version 20
+        (Version::V20, ErrorCorrection::L) => Some(6888),
+        (Version::V20, ErrorCorrection::M) => Some(5352),
+        (Version::V20, ErrorCorrection::Q) => Some(3880),
+        (Version::V20, ErrorCorrection::H) => Some(3080),
+        // Version 21
+        (Version::V21, ErrorCorrection::L) => Some(7456),
+        (Version::V21, ErrorCorrection::M) => Some(5712),
+        (Version::V21, ErrorCorrection::Q) => Some(4096),
+        (Version::V21, ErrorCorrection::H) => Some(3248),
+        // Version 22
+        (Version::V22, ErrorCorrection::L) => Some(8048),
+        (Version::V22, ErrorCorrection::M) => Some(6256),
+        (Version::V22, ErrorCorrection::Q) => Some(4544),
+        (Version::V22, ErrorCorrection::H) => Some(3536),
+        // Version 23
+        (Version::V23, ErrorCorrection::L) => Some(8752),
+        (Version::V23, ErrorCorrection::M) => Some(6880),
+        (Version::V23, ErrorCorrection::Q) => Some(4912),
+        (Version::V23, ErrorCorrection::H) => Some(3712),
+        // Version 24
+        (Version::V24, ErrorCorrection::L) => Some(9392),
+        (Version::V24, ErrorCorrection::M) => Some(7312),
+        (Version::V24, ErrorCorrection::Q) => Some(5312),
+        (Version::V24, ErrorCorrection::H) => Some(4112),
+        // Version 25
+        (Version::V25, ErrorCorrection::L) => Some(10208),
+        (Version::V25, ErrorCorrection::M) => Some(8000),
+        (Version::V25, ErrorCorrection::Q) => Some(5744),
+        (Version::V25, ErrorCorrection::H) => Some(4304),
+        // Version 26
+        (Version::V26, ErrorCorrection::L) => Some(10960),
+        (Version::V26, ErrorCorrection::M) => Some(8496),
+        (Version::V26, ErrorCorrection::Q) => Some(6032),
+        (Version::V26, ErrorCorrection::H) => Some(4768),
+        // Version 27
+        (Version::V27, ErrorCorrection::L) => Some(11744),
+        (Version::V27, ErrorCorrection::M) => Some(9024),
+        (Version::V27, ErrorCorrection::Q) => Some(6464),
+        (Version::V27, ErrorCorrection::H) => Some(5024),
+        // Version 28
+        (Version::V28, ErrorCorrection::L) => Some(12248),
+        (Version::V28, ErrorCorrection::M) => Some(9544),
+        (Version::V28, ErrorCorrection::Q) => Some(6968),
+        (Version::V28, ErrorCorrection::H) => Some(5288),
+        // Version 29
+        (Version::V29, ErrorCorrection::L) => Some(13048),
+        (Version::V29, ErrorCorrection::M) => Some(10136),
+        (Version::V29, ErrorCorrection::Q) => Some(7288),
+        (Version::V29, ErrorCorrection::H) => Some(5608),
+        // Version 30
+        (Version::V30, ErrorCorrection::L) => Some(13880),
+        (Version::V30, ErrorCorrection::M) => Some(10984),
+        (Version::V30, ErrorCorrection::Q) => Some(7880),
+        (Version::V30, ErrorCorrection::H) => Some(5960),
+        // Version 31
+        (Version::V31, ErrorCorrection::L) => Some(14744),
+        (Version::V31, ErrorCorrection::M) => Some(11640),
+        (Version::V31, ErrorCorrection::Q) => Some(8264),
+        (Version::V31, ErrorCorrection::H) => Some(6344),
+        // Version 32
+        (Version::V32, ErrorCorrection::L) => Some(15640),
+        (Version::V32, ErrorCorrection::M) => Some(12328),
+        (Version::V32, ErrorCorrection::Q) => Some(8920),
+        (Version::V32, ErrorCorrection::H) => Some(6760),
+        // Version 33
+        (Version::V33, ErrorCorrection::L) => Some(16568),
+        (Version::V33, ErrorCorrection::M) => Some(13048),
+        (Version::V33, ErrorCorrection::Q) => Some(9368),
+        (Version::V33, ErrorCorrection::H) => Some(7208),
+        // Version 34
+        (Version::V34, ErrorCorrection::L) => Some(17528),
+        (Version::V34, ErrorCorrection::M) => Some(13800),
+        (Version::V34, ErrorCorrection::Q) => Some(9848),
+        (Version::V34, ErrorCorrection::H) => Some(7688),
+        // Version 35
+        (Version::V35, ErrorCorrection::L) => Some(18448),
+        (Version::V35, ErrorCorrection::M) => Some(14496),
+        (Version::V35, ErrorCorrection::Q) => Some(10288),
+        (Version::V35, ErrorCorrection::H) => Some(7888),
+        // Version 36
+        (Version::V36, ErrorCorrection::L) => Some(19472),
+        (Version::V36, ErrorCorrection::M) => Some(15312),
+        (Version::V36, ErrorCorrection::Q) => Some(10832),
+        (Version::V36, ErrorCorrection::H) => Some(8432),
+        // Version 37
+        (Version::V37, ErrorCorrection::L) => Some(20528),
+        (Version::V37, ErrorCorrection::M) => Some(15936),
+        (Version::V37, ErrorCorrection::Q) => Some(11408),
+        (Version::V37, ErrorCorrection::H) => Some(8768),
+        // Version 38
+        (Version::V38, ErrorCorrection::L) => Some(21616),
+        (Version::V38, ErrorCorrection::M) => Some(16816),
+        (Version::V38, ErrorCorrection::Q) => Some(12016),
+        (Version::V38, ErrorCorrection::H) => Some(9136),
+        // Version 39
+        (Version::V39, ErrorCorrection::L) => Some(22496),
+        (Version::V39, ErrorCorrection::M) => Some(17728),
+        (Version::V39, ErrorCorrection::Q) => Some(12656),
+        (Version::V39, ErrorCorrection::H) => Some(9776),
+        // Version 40
+        (Version::V40, ErrorCorrection::L) => Some(23648),
+        (Version::V40, ErrorCorrection::M) => Some(18672),
+        (Version::V40, ErrorCorrection::Q) => Some(13328),
+        (Version::V40, ErrorCorrection::H) => Some(10208),
     }
 }
 
@@ -822,6 +1099,7 @@ fn bits_to_usize(bits: &[u8]) -> usize {
     bits.iter().fold(0, |acc, &bit| (acc << 1) | (bit as usize))
 }
 
+#[allow(dead_code)]
 fn decode_data(matrix: &[Vec<u8>], mask: MaskPattern, version: Option<Version>) -> Result<(DataMode, String), String> {
     // Simple data extraction - read from data area
     let mut data_bits = Vec::new();
@@ -864,6 +1142,7 @@ fn decode_data(matrix: &[Vec<u8>], mask: MaskPattern, version: Option<Version>) 
     }
 }
 
+#[allow(dead_code)]
 fn decode_numeric(bits: &[u8]) -> Result<(DataMode, String), String> {
     if bits.len() < 14 { return Err("Insufficient bits for numeric".to_string()); }
     
@@ -893,14 +1172,17 @@ fn decode_numeric(bits: &[u8]) -> Result<(DataMode, String), String> {
     Ok((DataMode::Numeric, result[..count.min(result.len())].to_string()))
 }
 
-fn decode_alphanumeric(bits: &[u8]) -> Result<(DataMode, String), String> {
+#[allow(dead_code)]
+fn decode_alphanumeric(_bits: &[u8]) -> Result<(DataMode, String), String> {
     Ok((DataMode::Alphanumeric, "ALPHANUMERIC_DATA".to_string()))
 }
 
-fn decode_byte(bits: &[u8]) -> Result<(DataMode, String), String> {
+#[allow(dead_code)]
+fn decode_byte(_bits: &[u8]) -> Result<(DataMode, String), String> {
     Ok((DataMode::Byte, "BYTE_DATA".to_string()))
 }
 
+#[allow(dead_code)]
 fn get_mask_bit(mask: MaskPattern, row: usize, col: usize) -> u8 {
     match mask {
         MaskPattern::Pattern0 => ((row + col) % 2) as u8,
@@ -959,6 +1241,7 @@ fn decode_format_info(format_value: u16) -> (Option<ErrorCorrection>, Option<Mas
     (None, None, None)
 }
 
+#[allow(dead_code)]
 fn bits_to_u8(bits: &[u8]) -> u8 {
     let mut result = 0u8;
     for (i, &bit) in bits.iter().enumerate() {
