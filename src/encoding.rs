@@ -377,11 +377,206 @@ fn generate_ecc(data_bits: &[u8], version: Version, error_correction: ErrorCorre
     
     // Get ECC codewords count based on version and error correction level
     let num_ecc_codewords = match (version, error_correction) {
-        (Version::V3, ErrorCorrection::L) => 7,
-        (Version::V3, ErrorCorrection::M) => 10,
-        (Version::V3, ErrorCorrection::Q) => 13,
-        (Version::V3, ErrorCorrection::H) => 17,
-        _ => 10, // Default fallback
+        // Version 1
+        (Version::V1, ErrorCorrection::L) => 7,
+        (Version::V1, ErrorCorrection::M) => 10,
+        (Version::V1, ErrorCorrection::Q) => 13,
+        (Version::V1, ErrorCorrection::H) => 17,
+        // Version 2
+        (Version::V2, ErrorCorrection::L) => 10,
+        (Version::V2, ErrorCorrection::M) => 16,
+        (Version::V2, ErrorCorrection::Q) => 22,
+        (Version::V2, ErrorCorrection::H) => 28,
+        // Version 3
+        (Version::V3, ErrorCorrection::L) => 15,
+        (Version::V3, ErrorCorrection::M) => 26,
+        (Version::V3, ErrorCorrection::Q) => 36,
+        (Version::V3, ErrorCorrection::H) => 44,
+        // Version 4
+        (Version::V4, ErrorCorrection::L) => 20,
+        (Version::V4, ErrorCorrection::M) => 36,
+        (Version::V4, ErrorCorrection::Q) => 52,
+        (Version::V4, ErrorCorrection::H) => 64,
+        // Version 5
+        (Version::V5, ErrorCorrection::L) => 26,
+        (Version::V5, ErrorCorrection::M) => 48,
+        (Version::V5, ErrorCorrection::Q) => 72,
+        (Version::V5, ErrorCorrection::H) => 88,
+        // Version 6
+        (Version::V6, ErrorCorrection::L) => 36,
+        (Version::V6, ErrorCorrection::M) => 64,
+        (Version::V6, ErrorCorrection::Q) => 96,
+        (Version::V6, ErrorCorrection::H) => 112,
+        // Version 7
+        (Version::V7, ErrorCorrection::L) => 40,
+        (Version::V7, ErrorCorrection::M) => 72,
+        (Version::V7, ErrorCorrection::Q) => 108,
+        (Version::V7, ErrorCorrection::H) => 130,
+        // Version 8
+        (Version::V8, ErrorCorrection::L) => 48,
+        (Version::V8, ErrorCorrection::M) => 88,
+        (Version::V8, ErrorCorrection::Q) => 132,
+        (Version::V8, ErrorCorrection::H) => 156,
+        // Version 9
+        (Version::V9, ErrorCorrection::L) => 60,
+        (Version::V9, ErrorCorrection::M) => 110,
+        (Version::V9, ErrorCorrection::Q) => 160,
+        (Version::V9, ErrorCorrection::H) => 192,
+        // Version 10
+        (Version::V10, ErrorCorrection::L) => 72,
+        (Version::V10, ErrorCorrection::M) => 130,
+        (Version::V10, ErrorCorrection::Q) => 192,
+        (Version::V10, ErrorCorrection::H) => 224,
+        // Version 11
+        (Version::V11, ErrorCorrection::L) => 80,
+        (Version::V11, ErrorCorrection::M) => 150,
+        (Version::V11, ErrorCorrection::Q) => 224,
+        (Version::V11, ErrorCorrection::H) => 264,
+        // Version 12
+        (Version::V12, ErrorCorrection::L) => 96,
+        (Version::V12, ErrorCorrection::M) => 176,
+        (Version::V12, ErrorCorrection::Q) => 260,
+        (Version::V12, ErrorCorrection::H) => 308,
+        // Version 13
+        (Version::V13, ErrorCorrection::L) => 104,
+        (Version::V13, ErrorCorrection::M) => 198,
+        (Version::V13, ErrorCorrection::Q) => 288,
+        (Version::V13, ErrorCorrection::H) => 352,
+        // Version 14
+        (Version::V14, ErrorCorrection::L) => 120,
+        (Version::V14, ErrorCorrection::M) => 216,
+        (Version::V14, ErrorCorrection::Q) => 320,
+        (Version::V14, ErrorCorrection::H) => 384,
+        // Version 15
+        (Version::V15, ErrorCorrection::L) => 132,
+        (Version::V15, ErrorCorrection::M) => 240,
+        (Version::V15, ErrorCorrection::Q) => 360,
+        (Version::V15, ErrorCorrection::H) => 432,
+        // Version 16
+        (Version::V16, ErrorCorrection::L) => 144,
+        (Version::V16, ErrorCorrection::M) => 280,
+        (Version::V16, ErrorCorrection::Q) => 408,
+        (Version::V16, ErrorCorrection::H) => 480,
+        // Version 17
+        (Version::V17, ErrorCorrection::L) => 168,
+        (Version::V17, ErrorCorrection::M) => 308,
+        (Version::V17, ErrorCorrection::Q) => 448,
+        (Version::V17, ErrorCorrection::H) => 532,
+        // Version 18
+        (Version::V18, ErrorCorrection::L) => 180,
+        (Version::V18, ErrorCorrection::M) => 338,
+        (Version::V18, ErrorCorrection::Q) => 504,
+        (Version::V18, ErrorCorrection::H) => 588,
+        // Version 19
+        (Version::V19, ErrorCorrection::L) => 196,
+        (Version::V19, ErrorCorrection::M) => 364,
+        (Version::V19, ErrorCorrection::Q) => 546,
+        (Version::V19, ErrorCorrection::H) => 650,
+        // Version 20
+        (Version::V20, ErrorCorrection::L) => 224,
+        (Version::V20, ErrorCorrection::M) => 416,
+        (Version::V20, ErrorCorrection::Q) => 600,
+        (Version::V20, ErrorCorrection::H) => 700,
+        // Version 21
+        (Version::V21, ErrorCorrection::L) => 224,
+        (Version::V21, ErrorCorrection::M) => 442,
+        (Version::V21, ErrorCorrection::Q) => 644,
+        (Version::V21, ErrorCorrection::H) => 750,
+        // Version 22
+        (Version::V22, ErrorCorrection::L) => 252,
+        (Version::V22, ErrorCorrection::M) => 476,
+        (Version::V22, ErrorCorrection::Q) => 690,
+        (Version::V22, ErrorCorrection::H) => 816,
+        // Version 23
+        (Version::V23, ErrorCorrection::L) => 270,
+        (Version::V23, ErrorCorrection::M) => 504,
+        (Version::V23, ErrorCorrection::Q) => 750,
+        (Version::V23, ErrorCorrection::H) => 900,
+        // Version 24
+        (Version::V24, ErrorCorrection::L) => 300,
+        (Version::V24, ErrorCorrection::M) => 560,
+        (Version::V24, ErrorCorrection::Q) => 810,
+        (Version::V24, ErrorCorrection::H) => 960,
+        // Version 25
+        (Version::V25, ErrorCorrection::L) => 312,
+        (Version::V25, ErrorCorrection::M) => 588,
+        (Version::V25, ErrorCorrection::Q) => 870,
+        (Version::V25, ErrorCorrection::H) => 1050,
+        // Version 26
+        (Version::V26, ErrorCorrection::L) => 336,
+        (Version::V26, ErrorCorrection::M) => 644,
+        (Version::V26, ErrorCorrection::Q) => 952,
+        (Version::V26, ErrorCorrection::H) => 1110,
+        // Version 27
+        (Version::V27, ErrorCorrection::L) => 360,
+        (Version::V27, ErrorCorrection::M) => 700,
+        (Version::V27, ErrorCorrection::Q) => 1020,
+        (Version::V27, ErrorCorrection::H) => 1200,
+        // Version 28
+        (Version::V28, ErrorCorrection::L) => 390,
+        (Version::V28, ErrorCorrection::M) => 728,
+        (Version::V28, ErrorCorrection::Q) => 1050,
+        (Version::V28, ErrorCorrection::H) => 1260,
+        // Version 29
+        (Version::V29, ErrorCorrection::L) => 420,
+        (Version::V29, ErrorCorrection::M) => 784,
+        (Version::V29, ErrorCorrection::Q) => 1140,
+        (Version::V29, ErrorCorrection::H) => 1350,
+        // Version 30
+        (Version::V30, ErrorCorrection::L) => 450,
+        (Version::V30, ErrorCorrection::M) => 812,
+        (Version::V30, ErrorCorrection::Q) => 1200,
+        (Version::V30, ErrorCorrection::H) => 1440,
+        // Version 31
+        (Version::V31, ErrorCorrection::L) => 480,
+        (Version::V31, ErrorCorrection::M) => 868,
+        (Version::V31, ErrorCorrection::Q) => 1290,
+        (Version::V31, ErrorCorrection::H) => 1530,
+        // Version 32
+        (Version::V32, ErrorCorrection::L) => 510,
+        (Version::V32, ErrorCorrection::M) => 924,
+        (Version::V32, ErrorCorrection::Q) => 1350,
+        (Version::V32, ErrorCorrection::H) => 1620,
+        // Version 33
+        (Version::V33, ErrorCorrection::L) => 540,
+        (Version::V33, ErrorCorrection::M) => 980,
+        (Version::V33, ErrorCorrection::Q) => 1440,
+        (Version::V33, ErrorCorrection::H) => 1710,
+        // Version 34
+        (Version::V34, ErrorCorrection::L) => 570,
+        (Version::V34, ErrorCorrection::M) => 1036,
+        (Version::V34, ErrorCorrection::Q) => 1530,
+        (Version::V34, ErrorCorrection::H) => 1800,
+        // Version 35
+        (Version::V35, ErrorCorrection::L) => 570,
+        (Version::V35, ErrorCorrection::M) => 1064,
+        (Version::V35, ErrorCorrection::Q) => 1590,
+        (Version::V35, ErrorCorrection::H) => 1890,
+        // Version 36
+        (Version::V36, ErrorCorrection::L) => 600,
+        (Version::V36, ErrorCorrection::M) => 1120,
+        (Version::V36, ErrorCorrection::Q) => 1680,
+        (Version::V36, ErrorCorrection::H) => 1980,
+        // Version 37
+        (Version::V37, ErrorCorrection::L) => 630,
+        (Version::V37, ErrorCorrection::M) => 1204,
+        (Version::V37, ErrorCorrection::Q) => 1770,
+        (Version::V37, ErrorCorrection::H) => 2100,
+        // Version 38
+        (Version::V38, ErrorCorrection::L) => 660,
+        (Version::V38, ErrorCorrection::M) => 1260,
+        (Version::V38, ErrorCorrection::Q) => 1860,
+        (Version::V38, ErrorCorrection::H) => 2220,
+        // Version 39
+        (Version::V39, ErrorCorrection::L) => 720,
+        (Version::V39, ErrorCorrection::M) => 1316,
+        (Version::V39, ErrorCorrection::Q) => 1950,
+        (Version::V39, ErrorCorrection::H) => 2310,
+        // Version 40
+        (Version::V40, ErrorCorrection::L) => 750,
+        (Version::V40, ErrorCorrection::M) => 1372,
+        (Version::V40, ErrorCorrection::Q) => 2040,
+        (Version::V40, ErrorCorrection::H) => 2430,
     };
     
     // Generate ECC using Reed-Solomon

@@ -605,28 +605,55 @@ fn read_data_bits(matrix: &[Vec<u8>], size: usize) -> Vec<u8> {
     
     // Determine version from size and calculate capacity
     let version = match size {
-        21 => Some(Version::V1),
-        25 => Some(Version::V2),
-        29 => Some(Version::V3),
-        33 => Some(Version::V4),
-        37 => Some(Version::V5),
-        41 => Some(Version::V6),
-        45 => Some(Version::V7),
-        49 => Some(Version::V8),
-        53 => Some(Version::V9),
-        57 => Some(Version::V10),
+        21 => Some(Version::V1),   // 21x21
+        25 => Some(Version::V2),   // 25x25
+        29 => Some(Version::V3),   // 29x29
+        33 => Some(Version::V4),   // 33x33
+        37 => Some(Version::V5),   // 37x37
+        41 => Some(Version::V6),   // 41x41
+        45 => Some(Version::V7),   // 45x45
+        49 => Some(Version::V8),   // 49x49
+        53 => Some(Version::V9),   // 53x53
+        57 => Some(Version::V10),  // 57x57
+        61 => Some(Version::V11),  // 61x61
+        65 => Some(Version::V12),  // 65x65
+        69 => Some(Version::V13),  // 69x69
+        73 => Some(Version::V14),  // 73x73
+        77 => Some(Version::V15),  // 77x77
+        81 => Some(Version::V16),  // 81x81
+        85 => Some(Version::V17),  // 85x85
+        89 => Some(Version::V18),  // 89x89
+        93 => Some(Version::V19),  // 93x93
+        97 => Some(Version::V20),  // 97x97
+        101 => Some(Version::V21), // 101x101
+        105 => Some(Version::V22), // 105x105
+        109 => Some(Version::V23), // 109x109
+        113 => Some(Version::V24), // 113x113
+        117 => Some(Version::V25), // 117x117
+        121 => Some(Version::V26), // 121x121
+        125 => Some(Version::V27), // 125x125
+        129 => Some(Version::V28), // 129x129
+        133 => Some(Version::V29), // 133x133
+        137 => Some(Version::V30), // 137x137
+        141 => Some(Version::V31), // 141x141
+        145 => Some(Version::V32), // 145x145
+        149 => Some(Version::V33), // 149x149
+        153 => Some(Version::V34), // 153x153
+        157 => Some(Version::V35), // 157x157
+        161 => Some(Version::V36), // 161x161
+        165 => Some(Version::V37), // 165x165
+        169 => Some(Version::V38), // 169x169
+        173 => Some(Version::V39), // 173x173
+        177 => Some(Version::V40), // 177x177
         _ => None,
     };
     
-    // Use minimum total capacity for the version (H level has lowest total capacity)
-    let max_bits = match size {
-        21 => 208,  // V1: all ECC levels have same total
-        25 => 304,  // V2: minimum is M level
-        29 => 344,  // V3: minimum is H level  
-        33 => 592,  // V4: minimum is M level
-        37 => 1232, // V5: minimum is H level
-        41 => 1568, // V6: minimum is H level
-        _ => usize::MAX,
+    // Use minimum total capacity for the version (H level typically has lowest total)
+    let max_bits = if let Some(v) = version {
+        // Use H level as it typically has the minimum total capacity
+        get_total_capacity(Some(v), Some(ErrorCorrection::H)).unwrap_or(208)
+    } else {
+        usize::MAX
     };
     
     while col > 0 && bits.len() < max_bits {
@@ -824,28 +851,58 @@ fn decode_byte_bits(bits: &[u8]) -> Option<String> {
 
 fn get_total_capacity(version: Option<Version>, ecc: Option<ErrorCorrection>) -> Option<usize> {
     let data_cap = get_data_capacity(version, ecc)?;
-    // Use actual ECC bit counts from QR standard
+    // ECC codewords × 8 bits per codeword
     let ecc_cap = match (version?, ecc?) {
         // Version 1
-        (Version::V1, ErrorCorrection::L) => 56,
-        (Version::V1, ErrorCorrection::M) => 80,
-        (Version::V1, ErrorCorrection::Q) => 104,
-        (Version::V1, ErrorCorrection::H) => 136,
-        // Version 2  
-        (Version::V2, ErrorCorrection::L) => 88,
-        (Version::V2, ErrorCorrection::M) => 80,
-        (Version::V2, ErrorCorrection::Q) => 184,
-        (Version::V2, ErrorCorrection::H) => 232,
+        (Version::V1, ErrorCorrection::L) => 7 * 8,
+        (Version::V1, ErrorCorrection::M) => 10 * 8,
+        (Version::V1, ErrorCorrection::Q) => 13 * 8,
+        (Version::V1, ErrorCorrection::H) => 17 * 8,
+        // Version 2
+        (Version::V2, ErrorCorrection::L) => 10 * 8,
+        (Version::V2, ErrorCorrection::M) => 16 * 8,
+        (Version::V2, ErrorCorrection::Q) => 22 * 8,
+        (Version::V2, ErrorCorrection::H) => 28 * 8,
         // Version 3
-        (Version::V3, ErrorCorrection::L) => 112,
-        (Version::V3, ErrorCorrection::M) => 200,
-        (Version::V3, ErrorCorrection::Q) => 280,
-        (Version::V3, ErrorCorrection::H) => 136,
+        (Version::V3, ErrorCorrection::L) => 15 * 8,
+        (Version::V3, ErrorCorrection::M) => 26 * 8,
+        (Version::V3, ErrorCorrection::Q) => 36 * 8,
+        (Version::V3, ErrorCorrection::H) => 44 * 8,
         // Version 4
-        (Version::V4, ErrorCorrection::L) => 112,
-        (Version::V4, ErrorCorrection::M) => 80,
-        (Version::V4, ErrorCorrection::Q) => 208,
-        (Version::V4, ErrorCorrection::H) => 304,
+        (Version::V4, ErrorCorrection::L) => 20 * 8,
+        (Version::V4, ErrorCorrection::M) => 36 * 8,
+        (Version::V4, ErrorCorrection::Q) => 52 * 8,
+        (Version::V4, ErrorCorrection::H) => 64 * 8,
+        // Version 5
+        (Version::V5, ErrorCorrection::L) => 26 * 8,
+        (Version::V5, ErrorCorrection::M) => 48 * 8,
+        (Version::V5, ErrorCorrection::Q) => 72 * 8,
+        (Version::V5, ErrorCorrection::H) => 88 * 8,
+        // Version 6
+        (Version::V6, ErrorCorrection::L) => 36 * 8,
+        (Version::V6, ErrorCorrection::M) => 64 * 8,
+        (Version::V6, ErrorCorrection::Q) => 96 * 8,
+        (Version::V6, ErrorCorrection::H) => 112 * 8,
+        // Version 7
+        (Version::V7, ErrorCorrection::L) => 40 * 8,
+        (Version::V7, ErrorCorrection::M) => 72 * 8,
+        (Version::V7, ErrorCorrection::Q) => 108 * 8,
+        (Version::V7, ErrorCorrection::H) => 130 * 8,
+        // Version 8
+        (Version::V8, ErrorCorrection::L) => 48 * 8,
+        (Version::V8, ErrorCorrection::M) => 88 * 8,
+        (Version::V8, ErrorCorrection::Q) => 132 * 8,
+        (Version::V8, ErrorCorrection::H) => 156 * 8,
+        // Version 9
+        (Version::V9, ErrorCorrection::L) => 60 * 8,
+        (Version::V9, ErrorCorrection::M) => 110 * 8,
+        (Version::V9, ErrorCorrection::Q) => 160 * 8,
+        (Version::V9, ErrorCorrection::H) => 192 * 8,
+        // Version 10
+        (Version::V10, ErrorCorrection::L) => 72 * 8,
+        (Version::V10, ErrorCorrection::M) => 130 * 8,
+        (Version::V10, ErrorCorrection::Q) => 192 * 8,
+        (Version::V10, ErrorCorrection::H) => 224 * 8,
         _ => 80,
     };
     Some(data_cap + ecc_cap)
