@@ -209,7 +209,7 @@ fn get_block_structure(data_bits: &[u8], ecc_bits: &[u8]) -> (Vec<Vec<u8>>, Vec<
     let data_bytes = bits_to_bytes(data_bits);
     let ecc_bytes = bits_to_bytes(ecc_bits);
     
-    // Version 3 uses 1 block for all ECC levels
+    // For now, simple single block structure
     let data_blocks = vec![data_bytes];
     let ecc_blocks = vec![ecc_bytes];
     
