@@ -254,7 +254,7 @@ fn is_function_module(x: usize, y: usize, size: usize) -> bool {
     }
     
     // Version info areas (for V7+)
-    if size >= 45 { // V7+ 
+    if size >= 45 { // V7+ (V7=45, V8=49, V9=53, V10=57) 
         if (x < 6 && y >= size - 11 && y < size - 8) ||
            (y < 6 && x >= size - 11 && x < size - 8) {
             return true;
@@ -356,15 +356,15 @@ fn calculate_version(data: &str, error_correction: ErrorCorrection, data_mode: D
     
     // Capacity table for different versions and ECC levels (in characters)
     let capacity = match (data_mode, error_correction) {
-        (DataMode::Byte, ErrorCorrection::L) => [17, 32, 53, 78, 106, 134, 154],
-        (DataMode::Byte, ErrorCorrection::M) => [14, 26, 42, 62, 84, 106, 122],
-        (DataMode::Byte, ErrorCorrection::Q) => [11, 20, 32, 46, 60, 74, 86],
-        (DataMode::Byte, ErrorCorrection::H) => [7, 14, 24, 34, 44, 58, 64],
-        (DataMode::Alphanumeric, ErrorCorrection::L) => [25, 47, 77, 114, 154, 195, 224],
-        (DataMode::Alphanumeric, ErrorCorrection::M) => [20, 38, 61, 90, 122, 154, 178],
-        (DataMode::Alphanumeric, ErrorCorrection::Q) => [16, 29, 47, 67, 87, 108, 125],
-        (DataMode::Alphanumeric, ErrorCorrection::H) => [10, 20, 35, 50, 64, 84, 93],
-        _ => [14, 26, 42, 62, 84, 106, 122], // Default to Byte M
+        (DataMode::Byte, ErrorCorrection::L) => [17, 32, 53, 78, 106, 134, 154, 192, 230, 271],
+        (DataMode::Byte, ErrorCorrection::M) => [14, 26, 42, 62, 84, 106, 122, 152, 180, 213],
+        (DataMode::Byte, ErrorCorrection::Q) => [11, 20, 32, 46, 60, 74, 86, 108, 130, 151],
+        (DataMode::Byte, ErrorCorrection::H) => [7, 14, 24, 34, 44, 58, 64, 84, 98, 119],
+        (DataMode::Alphanumeric, ErrorCorrection::L) => [25, 47, 77, 114, 154, 195, 224, 279, 335, 395],
+        (DataMode::Alphanumeric, ErrorCorrection::M) => [20, 38, 61, 90, 122, 154, 178, 221, 262, 311],
+        (DataMode::Alphanumeric, ErrorCorrection::Q) => [16, 29, 47, 67, 87, 108, 125, 157, 189, 221],
+        (DataMode::Alphanumeric, ErrorCorrection::H) => [10, 20, 35, 50, 64, 84, 93, 122, 143, 174],
+        _ => [14, 26, 42, 62, 84, 106, 122, 152, 180, 213], // Default to Byte M
     };
     
     // Find minimum version that can hold the data
@@ -378,12 +378,15 @@ fn calculate_version(data: &str, error_correction: ErrorCorrection, data_mode: D
                 4 => Version::V5,
                 5 => Version::V6,
                 6 => Version::V7,
-                _ => Version::V7,
+                7 => Version::V8,
+                8 => Version::V9,
+                9 => Version::V10,
+                _ => Version::V10,
             };
         }
     }
     
-    Version::V7 // Fallback to largest supported version
+    Version::V10 // Fallback to largest supported version
 }
 
 fn generate_qr_matrix(data: &str, config: &QrConfig) -> Vec<Vec<u8>> {
