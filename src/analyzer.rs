@@ -27,6 +27,7 @@ struct QrAnalysis {
     decoded_text: Option<String>,
     data_analysis: DataAnalysis,
     format_info: FormatInfo,
+    version_info: Option<VersionInfo>,
     finder_patterns: Vec<FinderPattern>,
     timing_patterns: TimingPatterns,
     dark_module: DarkModule,
@@ -44,6 +45,14 @@ struct FormatInfo {
     error_correction: Option<ErrorCorrection>,
     mask_pattern: Option<MaskPattern>,
     version: Option<Version>,
+}
+
+#[derive(Debug, Serialize)]
+struct VersionInfo {
+    raw_bits_copy1: Option<String>,
+    raw_bits_copy2: Option<String>,
+    copies_match: bool,
+    version: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -161,6 +170,7 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
             mask_pattern: None,
             version: None,
         },
+        version_info: None,
         data_analysis: DataAnalysis {
             full_bit_string: None,
             unmasked_bit_string: None,
@@ -253,6 +263,9 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
         analysis.mask_pattern = analysis.format_info.mask_pattern;
         analysis.version_from_format = analysis.format_info.version;
     }
+    
+    // Analyze version information (V7+)
+    analysis.version_info = analyze_version_info(&matrix);
     
     // Check if versions match
     analysis.versions_match = analysis.version_from_size == analysis.version_from_format;
@@ -1548,7 +1561,52 @@ fn get_mask_bit(mask: MaskPattern, row: usize, col: usize) -> u8 {
     }
 }
 
+fn analyze_version_info(matrix: &[Vec<u8>]) -> Option<VersionInfo> {
+    let size = matrix.len();
+    if size < 45 { // Only V7+ have version info
+        return None;
+    }
+    
+    // Extract version info from bottom-left (6x3)
+    let mut bits1 = String::new();
+    for i in 0..6 {
+        for j in 0..3 {
+            bits1.push_str(&matrix[size - 11 + j][i].to_string());
+        }
+    }
+    
+    // Extract version info from top-right (3x6)
+    let mut bits2 = String::new();
+    for i in 0..6 {
+        for j in 0..3 {
+            bits2.push_str(&matrix[i][size - 11 + j].to_string());
+        }
+    }
+    
+    let copies_match = bits1 == bits2;
+    let version = if copies_match {
+        match bits1.as_str() {
+            "000111110010010100" => Some("V7".to_string()),
+            "001000010110111100" => Some("V8".to_string()),
+            "001001101010011001" => Some("V9".to_string()),
+            "001010010011010011" => Some("V10".to_string()),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    
+    Some(VersionInfo {
+        raw_bits_copy1: Some(bits1),
+        raw_bits_copy2: Some(bits2),
+        copies_match,
+        version,
+    })
+}
+
 fn decode_format_info(format_value: u16) -> (Option<ErrorCorrection>, Option<MaskPattern>, Option<Version>) {
+    use crate::types::{ErrorCorrection, MaskPattern};
+    
     let format_map = [
         (0b111011111000100, ErrorCorrection::L, MaskPattern::Pattern0),
         (0b111001011110011, ErrorCorrection::L, MaskPattern::Pattern1),

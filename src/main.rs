@@ -253,13 +253,60 @@ fn is_function_module(x: usize, y: usize, size: usize) -> bool {
         return true;
     }
     
+    // Version info areas (for V7+)
+    if size >= 45 { // V7+ 
+        if (x < 6 && y >= size - 11 && y < size - 8) ||
+           (y < 6 && x >= size - 11 && x < size - 8) {
+            return true;
+        }
+    }
+    
+    // Dark module (at position (size-8, 8))
+    if x == 8 && y == size - 8 {
+        return true;
+    }
+    
     false
 }
 
 
+fn get_version_info(version: Version) -> Option<u32> {
+    // Version information for V7+ (18 bits with error correction)
+    match version {
+        Version::V7 => Some(0b000111110010010100),
+        Version::V8 => Some(0b001000010110111100),
+        Version::V9 => Some(0b001001101010011001),
+        Version::V10 => Some(0b001010010011010011),
+        _ => None, // V1-V6 don't use version info, V11+ not implemented yet
+    }
+}
+
+fn add_version_info(matrix: &mut Vec<Vec<u8>>, version: Version) {
+    if let Some(version_info) = get_version_info(version) {
+        let size = matrix.len();
+        
+        // Bottom-left version info (6x3 area)
+        for i in 0..6 {
+            for j in 0..3 {
+                let bit = (version_info >> (i * 3 + j)) & 1;
+                matrix[size - 11 + j][i] = bit as u8;
+            }
+        }
+        
+        // Top-right version info (3x6 area) 
+        for i in 0..6 {
+            for j in 0..3 {
+                let bit = (version_info >> (i * 3 + j)) & 1;
+                matrix[i][size - 11 + j] = bit as u8;
+            }
+        }
+    }
+}
+
 fn add_dark_module(matrix: &mut Vec<Vec<u8>>, version: Version) {
-    let size = version.size();
-    matrix[size - 8][8] = 1;
+    let size = matrix.len();
+    let dark_module_pos = size - 8;
+    matrix[dark_module_pos][8] = 1;
 }
 
 fn print_verbose_info(config: &QrConfig, encoded: &EncodedData, version: Version) {
@@ -369,6 +416,7 @@ fn generate_qr_matrix(data: &str, config: &QrConfig) -> Vec<Vec<u8>> {
     
     add_timing_patterns(&mut matrix, size);
     add_format_info(&mut matrix, config.error_correction, config.mask_pattern);
+    add_version_info(&mut matrix, version);
     add_dark_module(&mut matrix, version);
     
     matrix
