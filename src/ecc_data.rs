@@ -50,20 +50,53 @@ pub fn get_ecc_codewords(version: Version, error_correction: ErrorCorrection) ->
 pub fn get_data_capacity(version: Version, error_correction: ErrorCorrection, data_mode: DataMode) -> usize {
     let v = version as u8;
     match (data_mode, error_correction) {
+        (DataMode::Numeric, ErrorCorrection::L) => match v {
+            1..=10 => [41, 77, 127, 187, 255, 322, 370, 461, 552, 652][v as usize - 1],
+            _ => 0,
+        },
+        (DataMode::Numeric, ErrorCorrection::M) => match v {
+            1..=10 => [34, 63, 101, 149, 202, 255, 293, 365, 432, 513][v as usize - 1],
+            _ => 0,
+        },
+        (DataMode::Numeric, ErrorCorrection::Q) => match v {
+            1..=10 => [27, 48, 77, 111, 144, 178, 207, 259, 312, 364][v as usize - 1],
+            _ => 0,
+        },
+        (DataMode::Numeric, ErrorCorrection::H) => match v {
+            1..=10 => [17, 34, 58, 82, 106, 139, 154, 202, 235, 288][v as usize - 1],
+            _ => 0,
+        },
+        (DataMode::Alphanumeric, ErrorCorrection::L) => match v {
+            1..=10 => [25, 47, 77, 114, 154, 195, 224, 279, 335, 395][v as usize - 1],
+            _ => 0,
+        },
+        (DataMode::Alphanumeric, ErrorCorrection::M) => match v {
+            1..=10 => [20, 38, 61, 90, 122, 154, 178, 221, 262, 311][v as usize - 1],
+            _ => 0,
+        },
+        (DataMode::Alphanumeric, ErrorCorrection::Q) => match v {
+            1..=10 => [16, 29, 47, 67, 87, 108, 125, 157, 189, 221][v as usize - 1],
+            _ => 0,
+        },
+        (DataMode::Alphanumeric, ErrorCorrection::H) => match v {
+            1..=10 => [10, 20, 35, 50, 64, 84, 93, 122, 143, 174][v as usize - 1],
+            _ => 0,
+        },
         (DataMode::Byte, ErrorCorrection::L) => match v {
             1..=10 => [17, 32, 53, 78, 106, 134, 154, 192, 230, 271][v as usize - 1],
-            11..=20 => [321, 367, 425, 458, 520, 586, 644, 718, 792, 858][v as usize - 11],
-            21..=30 => [929, 1003, 1091, 1171, 1273, 1367, 1465, 1528, 1628, 1732][v as usize - 21],
-            31..=40 => [1840, 1952, 2068, 2188, 2303, 2431, 2563, 2699, 2809, 2953][v as usize - 31],
             _ => 0,
         },
         (DataMode::Byte, ErrorCorrection::M) => match v {
             1..=10 => [14, 26, 42, 62, 84, 106, 122, 152, 180, 213][v as usize - 1],
-            11..=20 => [251, 287, 331, 362, 412, 450, 504, 560, 624, 666][v as usize - 11],
-            21..=30 => [711, 779, 857, 911, 997, 1059, 1125, 1190, 1264, 1370][v as usize - 21],
-            31..=40 => [1452, 1538, 1628, 1722, 1809, 1911, 1989, 2099, 2213, 2331][v as usize - 31],
             _ => 0,
         },
-        _ => 0, // Other modes not fully implemented for V11+
+        (DataMode::Byte, ErrorCorrection::Q) => match v {
+            1..=10 => [11, 20, 32, 46, 60, 74, 86, 108, 130, 151][v as usize - 1],
+            _ => 0,
+        },
+        (DataMode::Byte, ErrorCorrection::H) => match v {
+            1..=10 => [7, 14, 24, 34, 44, 58, 64, 84, 98, 119][v as usize - 1],
+            _ => 0,
+        },
     }
 }
