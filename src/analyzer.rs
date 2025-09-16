@@ -193,6 +193,42 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
         25 => Some(Version::V2),
         29 => Some(Version::V3),
         33 => Some(Version::V4),
+        37 => Some(Version::V5),
+        41 => Some(Version::V6),
+        45 => Some(Version::V7),
+        49 => Some(Version::V8),
+        53 => Some(Version::V9),
+        57 => Some(Version::V10),
+        61 => Some(Version::V11),
+        65 => Some(Version::V12),
+        69 => Some(Version::V13),
+        73 => Some(Version::V14),
+        77 => Some(Version::V15),
+        81 => Some(Version::V16),
+        85 => Some(Version::V17),
+        89 => Some(Version::V18),
+        93 => Some(Version::V19),
+        97 => Some(Version::V20),
+        101 => Some(Version::V21),
+        105 => Some(Version::V22),
+        109 => Some(Version::V23),
+        113 => Some(Version::V24),
+        117 => Some(Version::V25),
+        121 => Some(Version::V26),
+        125 => Some(Version::V27),
+        129 => Some(Version::V28),
+        133 => Some(Version::V29),
+        137 => Some(Version::V30),
+        141 => Some(Version::V31),
+        145 => Some(Version::V32),
+        149 => Some(Version::V33),
+        153 => Some(Version::V34),
+        157 => Some(Version::V35),
+        161 => Some(Version::V36),
+        165 => Some(Version::V37),
+        169 => Some(Version::V38),
+        173 => Some(Version::V39),
+        177 => Some(Version::V40),
         _ => {
             analysis.errors.push(format!("Unsupported QR code size: {}x{}", inner_size, inner_size));
             None
@@ -223,7 +259,7 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
     
     // Analyze alignment patterns (for V2+)
     if let Some(version) = analysis.version_from_size {
-        if matches!(version, Version::V2 | Version::V3 | Version::V4) {
+        if !matches!(version, Version::V1) {
             analysis.alignment_patterns = analyze_alignment_patterns(&matrix, version);
         }
     }
@@ -432,33 +468,80 @@ fn analyze_format_info(matrix: &[Vec<u8>]) -> Option<FormatInfo> {
 
 fn analyze_alignment_patterns(matrix: &[Vec<u8>], version: Version) -> Vec<AlignmentPattern> {
     let mut patterns = Vec::new();
+    let positions = get_alignment_pattern_positions(version);
     
-    match version {
-        Version::V2 => {
-            patterns.push(AlignmentPattern {
-                x: 16,
-                y: 16,
-                valid: check_alignment_pattern(matrix, 16, 16),
-            });
-        }
-        Version::V3 => {
-            patterns.push(AlignmentPattern {
-                x: 20,
-                y: 20,
-                valid: check_alignment_pattern(matrix, 20, 20),
-            });
-        }
-        Version::V4 => {
-            patterns.push(AlignmentPattern {
-                x: 24,
-                y: 24,
-                valid: check_alignment_pattern(matrix, 24, 24),
-            });
-        }
-        _ => {}
+    for &(x, y) in &positions {
+        patterns.push(AlignmentPattern {
+            x,
+            y,
+            valid: check_alignment_pattern(matrix, x, y),
+        });
     }
     
     patterns
+}
+
+fn get_alignment_pattern_positions(version: Version) -> Vec<(usize, usize)> {
+    let centers = match version {
+        Version::V1 => vec![],
+        Version::V2 => vec![6, 18],
+        Version::V3 => vec![6, 22],
+        Version::V4 => vec![6, 26],
+        Version::V5 => vec![6, 30],
+        Version::V6 => vec![6, 34],
+        Version::V7 => vec![6, 22, 38],
+        Version::V8 => vec![6, 24, 42],
+        Version::V9 => vec![6, 26, 46],
+        Version::V10 => vec![6, 28, 50],
+        Version::V11 => vec![6, 30, 54],
+        Version::V12 => vec![6, 32, 58],
+        Version::V13 => vec![6, 26, 46, 66],
+        Version::V14 => vec![6, 26, 46, 66],
+        Version::V15 => vec![6, 26, 48, 70],
+        Version::V16 => vec![6, 26, 50, 74],
+        Version::V17 => vec![6, 30, 54, 78],
+        Version::V18 => vec![6, 30, 56, 82],
+        Version::V19 => vec![6, 30, 58, 86],
+        Version::V20 => vec![6, 34, 62, 90],
+        Version::V21 => vec![6, 28, 50, 72, 94],
+        Version::V22 => vec![6, 26, 50, 74, 98],
+        Version::V23 => vec![6, 30, 54, 78, 102],
+        Version::V24 => vec![6, 28, 54, 80, 106],
+        Version::V25 => vec![6, 32, 58, 84, 110],
+        Version::V26 => vec![6, 30, 58, 86, 114],
+        Version::V27 => vec![6, 34, 62, 90, 118],
+        Version::V28 => vec![6, 26, 50, 74, 98, 122],
+        Version::V29 => vec![6, 30, 54, 78, 102, 126],
+        Version::V30 => vec![6, 26, 52, 78, 104, 130],
+        Version::V31 => vec![6, 30, 56, 82, 108, 134],
+        Version::V32 => vec![6, 34, 60, 86, 112, 138],
+        Version::V33 => vec![6, 30, 58, 86, 114, 142],
+        Version::V34 => vec![6, 34, 62, 90, 118, 146],
+        Version::V35 => vec![6, 30, 54, 78, 102, 126, 150],
+        Version::V36 => vec![6, 24, 50, 76, 102, 128, 154],
+        Version::V37 => vec![6, 28, 54, 80, 106, 132, 158],
+        Version::V38 => vec![6, 32, 58, 84, 110, 136, 162],
+        Version::V39 => vec![6, 26, 54, 82, 110, 138, 166],
+        Version::V40 => vec![6, 30, 58, 86, 114, 142, 170],
+    };
+    
+    let mut positions = Vec::new();
+    for (i, &y) in centers.iter().enumerate() {
+        for (j, &x) in centers.iter().enumerate() {
+            // Skip if overlaps with finder patterns (corners)
+            if (i == 0 && j == 0) ||                                    // Top-left
+               (i == 0 && j == centers.len() - 1) ||                    // Top-right  
+               (i == centers.len() - 1 && j == 0) {                     // Bottom-left
+                continue;
+            }
+            // Skip if overlaps with timing patterns
+            if x == 6 || y == 6 {
+                continue;
+            }
+            positions.push((x, y));
+        }
+    }
+    positions
 }
 
 fn check_alignment_pattern(matrix: &[Vec<u8>], center_x: usize, center_y: usize) -> bool {
