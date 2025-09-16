@@ -5,9 +5,11 @@ mod types;
 mod mask;
 mod encoding;
 mod ecc;
+mod ecc_data;
 use types::{Version, ErrorCorrection, MaskPattern, DataMode, QrConfig, OutputFormat};
 use mask::apply_mask;
 use encoding::{encode_data, EncodedData};
+use ecc_data::get_data_capacity;
 
 fn add_position_pattern(matrix: &mut Vec<Vec<u8>>, x: usize, y: usize) {
     let size = matrix.len();
@@ -271,14 +273,22 @@ fn is_function_module(x: usize, y: usize, size: usize) -> bool {
 
 
 fn get_version_info(version: Version) -> Option<u32> {
-    // Version information for V7+ (18 bits with error correction)
-    match version {
-        Version::V7 => Some(0b000111110010010100),
-        Version::V8 => Some(0b001000010110111100),
-        Version::V9 => Some(0b001001101010011001),
-        Version::V10 => Some(0b001010010011010011),
-        _ => None, // V1-V6 don't use version info, V11+ not implemented yet
+    let version_num = version as u8;
+    if version_num < 7 { return None; }
+    
+    // BCH(18,6) encoding for version information
+    let data = version_num as u32;
+    let generator = 0x1f25; // BCH generator polynomial
+    let mut result = data << 12;
+    
+    for _ in 0..6 {
+        if result & (1 << 17) != 0 {
+            result ^= generator << 5;
+        }
+        result <<= 1;
     }
+    
+    Some((data << 12) | (result >> 6))
 }
 
 fn add_version_info(matrix: &mut Vec<Vec<u8>>, version: Version) {
@@ -303,7 +313,7 @@ fn add_version_info(matrix: &mut Vec<Vec<u8>>, version: Version) {
     }
 }
 
-fn add_dark_module(matrix: &mut Vec<Vec<u8>>, version: Version) {
+fn add_dark_module(matrix: &mut Vec<Vec<u8>>, _version: Version) {
     let size = matrix.len();
     let dark_module_pos = size - 8;
     matrix[dark_module_pos][8] = 1;
@@ -354,40 +364,19 @@ fn format_bits_with_spaces(bits: &[u8]) -> String {
 fn calculate_version(data: &str, error_correction: ErrorCorrection, data_mode: DataMode) -> Version {
     let data_length = data.len();
     
-    // Capacity table for different versions and ECC levels (in characters)
-    let capacity = match (data_mode, error_correction) {
-        (DataMode::Byte, ErrorCorrection::L) => [17, 32, 53, 78, 106, 134, 154, 192, 230, 271],
-        (DataMode::Byte, ErrorCorrection::M) => [14, 26, 42, 62, 84, 106, 122, 152, 180, 213],
-        (DataMode::Byte, ErrorCorrection::Q) => [11, 20, 32, 46, 60, 74, 86, 108, 130, 151],
-        (DataMode::Byte, ErrorCorrection::H) => [7, 14, 24, 34, 44, 58, 64, 84, 98, 119],
-        (DataMode::Alphanumeric, ErrorCorrection::L) => [25, 47, 77, 114, 154, 195, 224, 279, 335, 395],
-        (DataMode::Alphanumeric, ErrorCorrection::M) => [20, 38, 61, 90, 122, 154, 178, 221, 262, 311],
-        (DataMode::Alphanumeric, ErrorCorrection::Q) => [16, 29, 47, 67, 87, 108, 125, 157, 189, 221],
-        (DataMode::Alphanumeric, ErrorCorrection::H) => [10, 20, 35, 50, 64, 84, 93, 122, 143, 174],
-        _ => [14, 26, 42, 62, 84, 106, 122, 152, 180, 213], // Default to Byte M
-    };
-    
     // Find minimum version that can hold the data
-    for (i, &cap) in capacity.iter().enumerate() {
-        if data_length <= cap {
-            return match i {
-                0 => Version::V1,
-                1 => Version::V2,
-                2 => Version::V3,
-                3 => Version::V4,
-                4 => Version::V5,
-                5 => Version::V6,
-                6 => Version::V7,
-                7 => Version::V8,
-                8 => Version::V9,
-                9 => Version::V10,
-                _ => Version::V10,
-            };
+    for version_num in 1..=40 {
+        let version = Version::from_u8(version_num).unwrap_or(Version::V40);
+        let capacity = get_data_capacity(version, error_correction, data_mode);
+        if capacity > 0 && data_length <= capacity {
+            return version;
         }
     }
     
-    Version::V10 // Fallback to largest supported version
+    Version::V40 // Fallback to largest version
 }
+
+
 
 fn generate_qr_matrix(data: &str, config: &QrConfig) -> Vec<Vec<u8>> {
     // Calculate appropriate version based on data

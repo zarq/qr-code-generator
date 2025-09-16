@@ -693,14 +693,14 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
         }
     }
     
-    let data_ecc_valid = if let (Some(data_cap), Some(total_cap)) = (data_capacity, total_capacity) {
+    let _data_ecc_valid = if let (Some(data_cap), Some(total_cap)) = (data_capacity, total_capacity) {
         validate_ecc(&unmasked_bits, data_cap, total_cap - data_cap, ecc_level)
     } else {
         false
     };
     
     // Analyze block structure
-    let block_structure = if let (Some(v), Some(ecc)) = (version, ecc_level) {
+    let _block_structure = if let (Some(v), Some(ecc)) = (version, ecc_level) {
         analyze_block_structure(v, ecc)
     } else {
         BlockStructure {
