@@ -11,7 +11,16 @@ path = "src/main.rs"
 name = "qr-analyzer"
 path = "src/analyzer.rs"
 
+[[bin]]
+name = "qr-noise"
+path = "src/bin/qr-noise.rs"
+
+[[bin]]
+name = "qr-diff"
+path = "src/bin/qr-diff.rs"
+
 [dependencies]
 image = "0.24"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+rand = "0.8"
