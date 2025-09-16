@@ -8,21 +8,8 @@ pub enum Version {
 }
 
 impl Version {
-    #[allow(dead_code)]
     pub fn size(&self) -> usize {
-        match self {
-            Version::V1 => 21,
-            Version::V2 => 25,
-            Version::V3 => 29,
-            Version::V4 => 33,
-            Version::V5 => 37,
-            Version::V6 => 41,
-            Version::V7 => 45,
-            Version::V8 => 49,
-            Version::V9 => 53,
-            Version::V10 => 57,
-            _ => 21 + ((*self as usize) * 4),
-        }
+        21 + (*self as u8 - 1) as usize * 4
     }
 
     #[allow(dead_code)]

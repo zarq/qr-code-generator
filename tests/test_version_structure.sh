@@ -23,10 +23,39 @@ case $VERSION in
     8) TEST_DATA="$(printf 'A%.0s' {1..152})" ;;
     9) TEST_DATA="$(printf 'A%.0s' {1..180})" ;;
     10) TEST_DATA="$(printf 'A%.0s' {1..213})" ;;
+    11) TEST_DATA="$(printf "%0603d" 1)" ;;
+    12) TEST_DATA="$(printf "%0690d" 1)" ;;
+    13) TEST_DATA="$(printf "%0795d" 1)" ;;
+    14) TEST_DATA="$(printf "%0870d" 1)" ;;
+    15) TEST_DATA="$(printf "%0990d" 1)" ;;
+    16) TEST_DATA="$(printf "%01081d" 1)" ;;
+    17) TEST_DATA="$(printf "%01211d" 1)" ;;
+    18) TEST_DATA="$(printf "%01345d" 1)" ;;
+    19) TEST_DATA="$(printf "%01499d" 1)" ;;
+    20) TEST_DATA="$(printf "%01599d" 1)" ;;
+    21) TEST_DATA="$(printf "%01707d" 1)" ;;
+    22) TEST_DATA="$(printf "%01871d" 1)" ;;
+    23) TEST_DATA="$(printf "%02058d" 1)" ;;
+    24) TEST_DATA="$(printf "%02187d" 1)" ;;
+    25) TEST_DATA="$(printf "%02394d" 1)" ;;
+    26) TEST_DATA="$(printf "%02543d" 1)" ;;
+    27) TEST_DATA="$(printf "%02700d" 1)" ;;
+    28) TEST_DATA="$(printf "%02856d" 1)" ;;
+    29) TEST_DATA="$(printf "%03034d" 1)" ;;
+    30) TEST_DATA="$(printf "%03288d" 1)" ;;
+    31) TEST_DATA="$(printf "%03485d" 1)" ;;
+    32) TEST_DATA="$(printf "%03692d" 1)" ;;
+    33) TEST_DATA="$(printf "%03908d" 1)" ;;
+    34) TEST_DATA="$(printf "%04133d" 1)" ;;
+    35) TEST_DATA="$(printf "%04342d" 1)" ;;
+    36) TEST_DATA="$(printf "%04587d" 1)" ;;
+    37) TEST_DATA="$(printf "%04774d" 1)" ;;
+    38) TEST_DATA="$(printf "%05038d" 1)" ;;
+    39) TEST_DATA="$(printf "%05312d" 1)" ;;
+    40) TEST_DATA="$(printf "%05595d" 1)" ;;
     *) 
-        # For higher versions, use numeric mode
-        NUMERIC_CAPACITY=$((20 + VERSION * 15))
-        TEST_DATA=$(printf "%0${NUMERIC_CAPACITY}d" 1)
+        echo "Version $VERSION not supported"
+        exit 1
         ;;
 esac
 
@@ -35,7 +64,7 @@ TEST_FILE="test_v${VERSION}_structure.png"
 if [ $VERSION -le 10 ]; then
     ./target/debug/qr-generator --byte-mode --data "$TEST_DATA" -o "$TEST_FILE" >/dev/null 2>&1
 else
-    ./target/debug/qr-generator --numeric-mode --data "$TEST_DATA" -o "$TEST_FILE" >/dev/null 2>&1
+    ./target/debug/qr-generator --numeric --data "$TEST_DATA" -o "$TEST_FILE" >/dev/null 2>&1
 fi
 
 if [ ! -f "$TEST_FILE" ]; then

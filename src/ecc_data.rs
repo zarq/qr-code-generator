@@ -52,10 +52,16 @@ pub fn get_data_capacity(version: Version, error_correction: ErrorCorrection, da
     match (data_mode, error_correction) {
         (DataMode::Numeric, ErrorCorrection::L) => match v {
             1..=10 => [41, 77, 127, 187, 255, 322, 370, 461, 552, 652][v as usize - 1],
+            11..=20 => [772, 883, 1022, 1101, 1250, 1408, 1548, 1725, 1903, 2061][v as usize - 11],
+            21..=30 => [2232, 2409, 2620, 2812, 3057, 3283, 3517, 3669, 3909, 4158][v as usize - 21],
+            31..=40 => [4417, 4686, 4965, 5253, 5529, 5836, 6153, 6479, 6743, 7089][v as usize - 31],
             _ => panic!("Numeric L mode not supported for version V{}", v),
         },
         (DataMode::Numeric, ErrorCorrection::M) => match v {
             1..=10 => [34, 63, 101, 149, 202, 255, 293, 365, 432, 513][v as usize - 1],
+            11..=20 => [604, 691, 796, 871, 991, 1082, 1212, 1346, 1500, 1600][v as usize - 11],
+            21..=30 => [1708, 1872, 2059, 2188, 2395, 2544, 2701, 2857, 3035, 3289][v as usize - 21],
+            31..=40 => [3486, 3693, 3909, 4134, 4343, 4588, 4775, 5039, 5313, 5596][v as usize - 31],
             _ => panic!("Numeric M mode not supported for version V{}", v),
         },
         (DataMode::Numeric, ErrorCorrection::Q) => match v {
@@ -68,10 +74,16 @@ pub fn get_data_capacity(version: Version, error_correction: ErrorCorrection, da
         },
         (DataMode::Alphanumeric, ErrorCorrection::L) => match v {
             1..=10 => [25, 47, 77, 114, 154, 195, 224, 279, 335, 395][v as usize - 1],
+            11..=20 => [468, 535, 619, 667, 758, 854, 938, 1046, 1153, 1249][v as usize - 11],
+            21..=30 => [1352, 1460, 1588, 1704, 1853, 1990, 2132, 2223, 2369, 2520][v as usize - 21],
+            31..=40 => [2677, 2840, 3009, 3183, 3351, 3537, 3729, 3927, 4087, 4296][v as usize - 31],
             _ => panic!("Alphanumeric L mode not supported for version V{}", v),
         },
         (DataMode::Alphanumeric, ErrorCorrection::M) => match v {
             1..=10 => [20, 38, 61, 90, 122, 154, 178, 221, 262, 311][v as usize - 1],
+            11..=20 => [366, 419, 483, 528, 600, 656, 734, 816, 909, 970][v as usize - 11],
+            21..=30 => [1035, 1134, 1248, 1326, 1451, 1542, 1637, 1732, 1839, 1994][v as usize - 21],
+            31..=40 => [2113, 2238, 2369, 2506, 2632, 2780, 2894, 3054, 3220, 3391][v as usize - 31],
             _ => panic!("Alphanumeric M mode not supported for version V{}", v),
         },
         (DataMode::Alphanumeric, ErrorCorrection::Q) => match v {
@@ -84,10 +96,16 @@ pub fn get_data_capacity(version: Version, error_correction: ErrorCorrection, da
         },
         (DataMode::Byte, ErrorCorrection::L) => match v {
             1..=10 => [17, 32, 53, 78, 106, 134, 154, 192, 230, 271][v as usize - 1],
+            11..=20 => [321, 367, 425, 458, 520, 586, 644, 718, 792, 858][v as usize - 11],
+            21..=30 => [929, 1003, 1091, 1171, 1273, 1367, 1465, 1528, 1628, 1732][v as usize - 21],
+            31..=40 => [1840, 1952, 2068, 2188, 2303, 2431, 2563, 2699, 2809, 2953][v as usize - 31],
             _ => panic!("Byte L mode not supported for version V{}", v),
         },
         (DataMode::Byte, ErrorCorrection::M) => match v {
             1..=10 => [14, 26, 42, 62, 84, 106, 122, 152, 180, 213][v as usize - 1],
+            11..=20 => [251, 287, 331, 362, 412, 450, 504, 560, 624, 666][v as usize - 11],
+            21..=30 => [711, 779, 857, 911, 997, 1059, 1125, 1190, 1264, 1370][v as usize - 21],
+            31..=40 => [1452, 1538, 1628, 1722, 1809, 1911, 1989, 2099, 2213, 2331][v as usize - 31],
             _ => panic!("Byte M mode not supported for version V{}", v),
         },
         (DataMode::Byte, ErrorCorrection::Q) => match v {

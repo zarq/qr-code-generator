@@ -6,10 +6,12 @@ mod mask;
 mod encoding;
 mod ecc;
 mod ecc_data;
+mod alignment;
 use types::{Version, ErrorCorrection, MaskPattern, DataMode, QrConfig, OutputFormat};
 use mask::apply_mask;
 use encoding::{encode_data, EncodedData};
 use ecc_data::get_data_capacity;
+use alignment::{is_alignment_pattern, get_alignment_positions};
 
 fn add_position_pattern(matrix: &mut Vec<Vec<u8>>, x: usize, y: usize) {
     let size = matrix.len();
@@ -141,7 +143,7 @@ fn add_format_info(matrix: &mut Vec<Vec<u8>>, error_correction: ErrorCorrection,
     }
 }
 
-fn place_data_bits(matrix: &mut Vec<Vec<u8>>, encoded: &EncodedData) {
+fn place_data_bits(matrix: &mut Vec<Vec<u8>>, encoded: &EncodedData, version: Version) {
     // Get block structure and interleave according to QR spec
     let (data_blocks, ecc_blocks) = get_block_structure(&encoded.data_bits, &encoded.ecc_bits);
     
@@ -194,7 +196,7 @@ fn place_data_bits(matrix: &mut Vec<Vec<u8>>, encoded: &EncodedData) {
             // Right column first, then left column
             for dx in 0..2 {
                 let x = col - dx;
-                if !is_function_module(x, y, size) && bit_index < bit_stream.len() {
+                if !is_function_module(x, y, size, version) && bit_index < bit_stream.len() {
                     matrix[y][x] = bit_stream[bit_index];
                     bit_index += 1;
                 }
@@ -230,7 +232,7 @@ fn bits_to_bytes(bits: &[u8]) -> Vec<u8> {
     bytes
 }
 
-fn is_function_module(x: usize, y: usize, size: usize) -> bool {
+fn is_function_module(x: usize, y: usize, size: usize, version: Version) -> bool {
     // Position patterns and separators
     if (x < 9 && y < 9) || (x >= size - 8 && y < 9) || (x < 9 && y >= size - 8) {
         return true;
@@ -241,12 +243,9 @@ fn is_function_module(x: usize, y: usize, size: usize) -> bool {
         return true;
     }
     
-    // Alignment pattern (for Version 2+)
-    if size > 21 {
-        let center = size - 7;
-        if x >= center - 2 && x <= center + 2 && y >= center - 2 && y <= center + 2 {
-            return true;
-        }
+    // Alignment patterns
+    if is_alignment_pattern(x, y, version) {
+        return true;
     }
     
     // Format info areas
@@ -308,6 +307,33 @@ fn add_version_info(matrix: &mut Vec<Vec<u8>>, version: Version) {
             for j in 0..3 {
                 let bit = (version_info >> (i * 3 + j)) & 1;
                 matrix[i][size - 11 + j] = bit as u8;
+            }
+        }
+    }
+}
+
+fn add_alignment_patterns(matrix: &mut Vec<Vec<u8>>, version: Version) {
+    let positions = get_alignment_positions(version);
+    let size = matrix.len();
+    
+    for &center_x in &positions {
+        for &center_y in &positions {
+            // Skip if overlaps with finder patterns
+            if (center_x <= 8 && center_y <= 8) ||
+               (center_x <= 8 && center_y >= size - 9) ||
+               (center_x >= size - 9 && center_y <= 8) {
+                continue;
+            }
+            
+            // Place 5x5 alignment pattern
+            for dy in 0..5 {
+                for dx in 0..5 {
+                    let x = center_x - 2 + dx;
+                    let y = center_y - 2 + dy;
+                    
+                    let is_dark = (dx == 0 || dx == 4 || dy == 0 || dy == 4) || (dx == 2 && dy == 2);
+                    matrix[y][x] = if is_dark { 1 } else { 0 };
+                }
             }
         }
     }
@@ -393,7 +419,7 @@ fn generate_qr_matrix(data: &str, config: &QrConfig) -> Vec<Vec<u8>> {
     }
     
     // Place the encoded data
-    place_data_bits(&mut matrix, &encoded);
+    place_data_bits(&mut matrix, &encoded, version);
     
     if !config.skip_mask {
         apply_mask(&mut matrix, config.mask_pattern);
@@ -410,6 +436,7 @@ fn generate_qr_matrix(data: &str, config: &QrConfig) -> Vec<Vec<u8>> {
     add_timing_patterns(&mut matrix, size);
     add_format_info(&mut matrix, config.error_correction, config.mask_pattern);
     add_version_info(&mut matrix, version);
+    add_alignment_patterns(&mut matrix, version);
     add_dark_module(&mut matrix, version);
     
     matrix
