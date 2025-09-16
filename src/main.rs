@@ -368,12 +368,13 @@ fn calculate_version(data: &str, error_correction: ErrorCorrection, data_mode: D
     for version_num in 1..=40 {
         let version = Version::from_u8(version_num).unwrap_or(Version::V40);
         let capacity = get_data_capacity(version, error_correction, data_mode);
-        if capacity > 0 && data_length <= capacity {
+        if data_length <= capacity {
             return version;
         }
     }
     
-    Version::V40 // Fallback to largest version
+    panic!("Data too large: {} characters cannot fit in any QR code version with {:?} error correction and {:?} mode", 
+           data_length, error_correction, data_mode);
 }
 
 
