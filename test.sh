@@ -18,6 +18,12 @@ fi
 
 # Make test scripts executable
 chmod +x tests/run_tests.sh
+chmod +x tests/test_all_noise.sh
+
+# Run QR-Noise tests
+echo "Running QR-Noise tests..."
+./tests/test_all_noise.sh
+echo
 chmod +x tests/test_version_structure.sh
 
 # Initialize counters

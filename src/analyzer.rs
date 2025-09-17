@@ -4,7 +4,10 @@ use serde::Serialize;
 
 mod types;
 mod mask;
+mod ecc;
+mod ecc_data;
 use types::{Version, ErrorCorrection, MaskPattern, DataMode};
+use ecc_data::get_data_capacity;
 
 #[derive(Debug, Serialize)]
 struct BorderCheck {
@@ -89,6 +92,9 @@ struct DataAnalysis {
     bit_string_size: Option<usize>,
     terminator_bits: Option<usize>,
     block_structure: Option<BlockStructure>,
+    // ECC Analysis Deliverables
+    data_corrupted: bool,
+    bits_corrected: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -187,6 +193,8 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
             bit_string_size: None,
             terminator_bits: None,
             block_structure: None,
+            data_corrupted: false,
+            bits_corrected: None,
         },
         finder_patterns: Vec::new(),
         timing_patterns: TimingPatterns { valid: false },
@@ -288,7 +296,8 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
                 _ => None,
             }
         });
-        analysis.decoded_text = analysis.data_analysis.extracted_data.clone();
+        analysis.decoded_text = analysis.data_analysis.corrected_data.clone()
+            .or_else(|| analysis.data_analysis.extracted_data.clone());
         analysis.raw_data = analysis.data_analysis.extracted_data.clone();
     }
     
@@ -608,12 +617,47 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
             bit_string_size: Some(raw_bits.len()),
             terminator_bits: None,
             block_structure: None,
+            data_corrupted: false,
+            bits_corrected: None,
         };
     }
     
-    // Step 3: Analyze unmasked data
-    let mode_bits = &unmasked_bits[0..4];
-    let encoding_info = mode_bits.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>();
+    // Step 2.5: Attempt error correction or fallback to original data
+    let corrected_bits = if let (Some(v), Some(ecc)) = (version, ecc_level) {
+        // Try error correction, but fall back to original if it fails
+        attempt_error_correction(&unmasked_bits, v, ecc).unwrap_or_else(|| {
+            // If Reed-Solomon error correction fails, return original bits
+            unmasked_bits.clone()
+        })
+    } else {
+        unmasked_bits.clone()
+    };
+    
+    // Step 3: Analyze corrected data
+    let mode_bits = &corrected_bits[0..4];
+    let mut encoding_info = mode_bits.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>();
+    
+    // If mode is unknown, try to correct it
+    if !matches!(encoding_info.as_str(), "0001" | "0010" | "0100" | "1000") {
+        // Try to find the closest valid mode
+        let valid_modes = [("0001", "Numeric"), ("0010", "Alphanumeric"), ("0100", "Byte"), ("1000", "Kanji")];
+        let mut best_mode = encoding_info.clone();
+        let mut min_diff = 4;
+        
+        for (mode, _) in &valid_modes {
+            let diff = encoding_info.chars().zip(mode.chars()).filter(|(a, b)| a != b).count();
+            if diff < min_diff {
+                min_diff = diff;
+                best_mode = mode.to_string();
+            }
+        }
+        
+        // If we found a close match (1-2 bit errors), use it
+        if min_diff <= 2 {
+            encoding_info = best_mode;
+        }
+    }
+    
     let encoding_mode = match encoding_info.as_str() {
         "0001" => Some("Numeric".to_string()),
         "0010" => Some("Alphanumeric".to_string()),
@@ -628,8 +672,8 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
         "0100" => 8,  // Byte mode in V1 uses 8 bits
         _ => 8,
     };
-    let data_length = if unmasked_bits.len() >= 4 + length_bits {
-        Some(bits_to_usize(&unmasked_bits[4..4+length_bits]))
+    let data_length = if corrected_bits.len() >= 4 + length_bits {
+        Some(bits_to_usize(&corrected_bits[4..4+length_bits]))
     } else {
         None
     };
@@ -642,15 +686,34 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
         _ => 0,
     };
     
-    let data_end = std::cmp::min(data_start + data_bits_needed, unmasked_bits.len());
-    let extracted_data = if data_end > data_start {
-        decode_data_bits(&unmasked_bits[data_start..data_end], &encoding_info)
+    // Remove old extraction logic - Reed-Solomon handles this now
+    
+    // Step 1: Apply Reed-Solomon correction to raw unmasked data
+    let (corrected_data_bytes, correction_percentage, ecc_valid, bits_corrected) = 
+        perform_ecc_correction(&raw_bits, version, ecc_level);
+    
+    // Step 2: Always try to decode data (use corrected if available, otherwise raw)
+    let decoded_data = decode_corrected_data(&corrected_data_bytes);
+    let (extracted_data, ecc_corrected_data) = if ecc_valid {
+        // Reed-Solomon succeeded - corrected data is reliable
+        (None, decoded_data)
+    } else {
+        // Reed-Solomon failed - treat as raw data
+        (decoded_data.clone(), decoded_data)
+    };
+    
+    // ECC Analysis Deliverables
+    let data_corrupted = correction_percentage > 0.0;
+    
+    // Apply only Reed-Solomon correction
+    let _corrected_data = ecc_corrected_data.clone();
+    
+    let total_capacity = get_total_capacity(version, ecc_level);
+    let data_capacity = if let (Some(v), Some(ecc)) = (version, ecc_level) {
+        Some(get_data_capacity(v, ecc, DataMode::Byte))
     } else {
         None
     };
-    
-    let total_capacity = get_total_capacity(version, ecc_level);
-    let data_capacity = get_data_capacity(version, ecc_level);
     
     // Calculate actual boundaries based on unmasked_bits length
     let total_bits_available = unmasked_bits.len();
@@ -664,6 +727,7 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
     };
     
     // Extract padding bits (between actual data and data capacity)
+    let data_end = std::cmp::min(total_bits_available, data_capacity_bits);
     let padding_start = data_end;
     let padding_end = std::cmp::min(data_capacity_bits, total_bits_available);
     let padding_bits = if padding_end > padding_start {
@@ -715,18 +779,6 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
         }
     };
     
-    // Perform ECC correction
-    let (corrected_data_bytes, correction_percentage, ecc_valid) = perform_ecc_correction(&raw_bits, version, ecc_level);
-    let corrected_data = if correction_percentage > 0.0 {
-        // Try to decode corrected data
-        match decode_data_from_bytes(&corrected_data_bytes) {
-            Ok((_, corrected_text)) => Some(corrected_text),
-            Err(_) => None,
-        }
-    } else {
-        None
-    };
-    
     DataAnalysis {
         full_bit_string: Some(raw_bit_string),
         unmasked_bit_string: Some(unmasked_bit_string),
@@ -734,7 +786,7 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
         encoding_mode,
         data_length,
         extracted_data,
-        corrected_data,
+        corrected_data: ecc_corrected_data,
         correction_percentage: Some(correction_percentage),
         ecc_bits,
         padding_bits,
@@ -756,6 +808,9 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
                 total_ecc_blocks: None,
             }
         }),
+        // ECC Analysis Deliverables
+        data_corrupted,
+        bits_corrected,
     }
 }
 
@@ -1010,315 +1065,8 @@ fn decode_byte_bits(bits: &[u8]) -> Option<String> {
     Some(result)
 }
 
-fn get_total_capacity(version: Option<Version>, ecc: Option<ErrorCorrection>) -> Option<usize> {
-    let data_cap = get_data_capacity(version, ecc)?;
-    // ECC codewords × 8 bits per codeword
-    let ecc_cap = match (version?, ecc?) {
-        // Version 1
-        (Version::V1, ErrorCorrection::L) => 7 * 8,
-        (Version::V1, ErrorCorrection::M) => 10 * 8,
-        (Version::V1, ErrorCorrection::Q) => 13 * 8,
-        (Version::V1, ErrorCorrection::H) => 17 * 8,
-        // Version 2
-        (Version::V2, ErrorCorrection::L) => 10 * 8,
-        (Version::V2, ErrorCorrection::M) => 16 * 8,
-        (Version::V2, ErrorCorrection::Q) => 22 * 8,
-        (Version::V2, ErrorCorrection::H) => 28 * 8,
-        // Version 3
-        (Version::V3, ErrorCorrection::L) => 15 * 8,
-        (Version::V3, ErrorCorrection::M) => 26 * 8,
-        (Version::V3, ErrorCorrection::Q) => 36 * 8,
-        (Version::V3, ErrorCorrection::H) => 44 * 8,
-        // Version 4
-        (Version::V4, ErrorCorrection::L) => 20 * 8,
-        (Version::V4, ErrorCorrection::M) => 36 * 8,
-        (Version::V4, ErrorCorrection::Q) => 52 * 8,
-        (Version::V4, ErrorCorrection::H) => 64 * 8,
-        // Version 5
-        (Version::V5, ErrorCorrection::L) => 26 * 8,
-        (Version::V5, ErrorCorrection::M) => 48 * 8,
-        (Version::V5, ErrorCorrection::Q) => 72 * 8,
-        (Version::V5, ErrorCorrection::H) => 88 * 8,
-        // Version 6
-        (Version::V6, ErrorCorrection::L) => 36 * 8,
-        (Version::V6, ErrorCorrection::M) => 64 * 8,
-        (Version::V6, ErrorCorrection::Q) => 96 * 8,
-        (Version::V6, ErrorCorrection::H) => 112 * 8,
-        // Version 7
-        (Version::V7, ErrorCorrection::L) => 40 * 8,
-        (Version::V7, ErrorCorrection::M) => 72 * 8,
-        (Version::V7, ErrorCorrection::Q) => 108 * 8,
-        (Version::V7, ErrorCorrection::H) => 130 * 8,
-        // Version 8
-        (Version::V8, ErrorCorrection::L) => 48 * 8,
-        (Version::V8, ErrorCorrection::M) => 88 * 8,
-        (Version::V8, ErrorCorrection::Q) => 132 * 8,
-        (Version::V8, ErrorCorrection::H) => 156 * 8,
-        // Version 9
-        (Version::V9, ErrorCorrection::L) => 60 * 8,
-        (Version::V9, ErrorCorrection::M) => 110 * 8,
-        (Version::V9, ErrorCorrection::Q) => 160 * 8,
-        (Version::V9, ErrorCorrection::H) => 192 * 8,
-        // Version 10
-        (Version::V10, ErrorCorrection::L) => 72 * 8,
-        (Version::V10, ErrorCorrection::M) => 130 * 8,
-        (Version::V10, ErrorCorrection::Q) => 192 * 8,
-        (Version::V10, ErrorCorrection::H) => 224 * 8,
-        _ => 80,
-    };
-    Some(data_cap + ecc_cap)
-}
-
-fn get_data_capacity(version: Option<Version>, ecc: Option<ErrorCorrection>) -> Option<usize> {
-    match (version?, ecc?) {
-        // Version 1
-        (Version::V1, ErrorCorrection::L) => Some(152),
-        (Version::V1, ErrorCorrection::M) => Some(128),
-        (Version::V1, ErrorCorrection::Q) => Some(104),
-        (Version::V1, ErrorCorrection::H) => Some(72),
-        // Version 2
-        (Version::V2, ErrorCorrection::L) => Some(272),
-        (Version::V2, ErrorCorrection::M) => Some(224),
-        (Version::V2, ErrorCorrection::Q) => Some(176),
-        (Version::V2, ErrorCorrection::H) => Some(128),
-        // Version 3
-        (Version::V3, ErrorCorrection::L) => Some(440),
-        (Version::V3, ErrorCorrection::M) => Some(352),
-        (Version::V3, ErrorCorrection::Q) => Some(272),
-        (Version::V3, ErrorCorrection::H) => Some(208),
-        // Version 4
-        (Version::V4, ErrorCorrection::L) => Some(640),
-        (Version::V4, ErrorCorrection::M) => Some(512),
-        (Version::V4, ErrorCorrection::Q) => Some(384),
-        (Version::V4, ErrorCorrection::H) => Some(288),
-        // Version 5
-        (Version::V5, ErrorCorrection::L) => Some(864),
-        (Version::V5, ErrorCorrection::M) => Some(688),
-        (Version::V5, ErrorCorrection::Q) => Some(496),
-        (Version::V5, ErrorCorrection::H) => Some(368),
-        // Version 6
-        (Version::V6, ErrorCorrection::L) => Some(1088),
-        (Version::V6, ErrorCorrection::M) => Some(864),
-        (Version::V6, ErrorCorrection::Q) => Some(608),
-        (Version::V6, ErrorCorrection::H) => Some(480),
-        // Version 7
-        (Version::V7, ErrorCorrection::L) => Some(1248),
-        (Version::V7, ErrorCorrection::M) => Some(992),
-        (Version::V7, ErrorCorrection::Q) => Some(704),
-        (Version::V7, ErrorCorrection::H) => Some(528),
-        // Version 8
-        (Version::V8, ErrorCorrection::L) => Some(1552),
-        (Version::V8, ErrorCorrection::M) => Some(1232),
-        (Version::V8, ErrorCorrection::Q) => Some(880),
-        (Version::V8, ErrorCorrection::H) => Some(688),
-        // Version 9
-        (Version::V9, ErrorCorrection::L) => Some(1856),
-        (Version::V9, ErrorCorrection::M) => Some(1456),
-        (Version::V9, ErrorCorrection::Q) => Some(1056),
-        (Version::V9, ErrorCorrection::H) => Some(800),
-        // Version 10
-        (Version::V10, ErrorCorrection::L) => Some(2192),
-        (Version::V10, ErrorCorrection::M) => Some(1728),
-        (Version::V10, ErrorCorrection::Q) => Some(1232),
-        (Version::V10, ErrorCorrection::H) => Some(976),
-        // Version 11
-        (Version::V11, ErrorCorrection::L) => Some(2592),
-        (Version::V11, ErrorCorrection::M) => Some(2032),
-        (Version::V11, ErrorCorrection::Q) => Some(1440),
-        (Version::V11, ErrorCorrection::H) => Some(1120),
-        // Version 12
-        (Version::V12, ErrorCorrection::L) => Some(2960),
-        (Version::V12, ErrorCorrection::M) => Some(2320),
-        (Version::V12, ErrorCorrection::Q) => Some(1648),
-        (Version::V12, ErrorCorrection::H) => Some(1264),
-        // Version 13
-        (Version::V13, ErrorCorrection::L) => Some(3424),
-        (Version::V13, ErrorCorrection::M) => Some(2672),
-        (Version::V13, ErrorCorrection::Q) => Some(1952),
-        (Version::V13, ErrorCorrection::H) => Some(1440),
-        // Version 14
-        (Version::V14, ErrorCorrection::L) => Some(3688),
-        (Version::V14, ErrorCorrection::M) => Some(2920),
-        (Version::V14, ErrorCorrection::Q) => Some(2088),
-        (Version::V14, ErrorCorrection::H) => Some(1576),
-        // Version 15
-        (Version::V15, ErrorCorrection::L) => Some(4184),
-        (Version::V15, ErrorCorrection::M) => Some(3320),
-        (Version::V15, ErrorCorrection::Q) => Some(2360),
-        (Version::V15, ErrorCorrection::H) => Some(1784),
-        // Version 16
-        (Version::V16, ErrorCorrection::L) => Some(4712),
-        (Version::V16, ErrorCorrection::M) => Some(3624),
-        (Version::V16, ErrorCorrection::Q) => Some(2600),
-        (Version::V16, ErrorCorrection::H) => Some(2024),
-        // Version 17
-        (Version::V17, ErrorCorrection::L) => Some(5176),
-        (Version::V17, ErrorCorrection::M) => Some(4056),
-        (Version::V17, ErrorCorrection::Q) => Some(2936),
-        (Version::V17, ErrorCorrection::H) => Some(2264),
-        // Version 18
-        (Version::V18, ErrorCorrection::L) => Some(5768),
-        (Version::V18, ErrorCorrection::M) => Some(4504),
-        (Version::V18, ErrorCorrection::Q) => Some(3176),
-        (Version::V18, ErrorCorrection::H) => Some(2504),
-        // Version 19
-        (Version::V19, ErrorCorrection::L) => Some(6360),
-        (Version::V19, ErrorCorrection::M) => Some(5016),
-        (Version::V19, ErrorCorrection::Q) => Some(3560),
-        (Version::V19, ErrorCorrection::H) => Some(2728),
-        // Version 20
-        (Version::V20, ErrorCorrection::L) => Some(6888),
-        (Version::V20, ErrorCorrection::M) => Some(5352),
-        (Version::V20, ErrorCorrection::Q) => Some(3880),
-        (Version::V20, ErrorCorrection::H) => Some(3080),
-        // Version 21
-        (Version::V21, ErrorCorrection::L) => Some(7456),
-        (Version::V21, ErrorCorrection::M) => Some(5712),
-        (Version::V21, ErrorCorrection::Q) => Some(4096),
-        (Version::V21, ErrorCorrection::H) => Some(3248),
-        // Version 22
-        (Version::V22, ErrorCorrection::L) => Some(8048),
-        (Version::V22, ErrorCorrection::M) => Some(6256),
-        (Version::V22, ErrorCorrection::Q) => Some(4544),
-        (Version::V22, ErrorCorrection::H) => Some(3536),
-        // Version 23
-        (Version::V23, ErrorCorrection::L) => Some(8752),
-        (Version::V23, ErrorCorrection::M) => Some(6880),
-        (Version::V23, ErrorCorrection::Q) => Some(4912),
-        (Version::V23, ErrorCorrection::H) => Some(3712),
-        // Version 24
-        (Version::V24, ErrorCorrection::L) => Some(9392),
-        (Version::V24, ErrorCorrection::M) => Some(7312),
-        (Version::V24, ErrorCorrection::Q) => Some(5312),
-        (Version::V24, ErrorCorrection::H) => Some(4112),
-        // Version 25
-        (Version::V25, ErrorCorrection::L) => Some(10208),
-        (Version::V25, ErrorCorrection::M) => Some(8000),
-        (Version::V25, ErrorCorrection::Q) => Some(5744),
-        (Version::V25, ErrorCorrection::H) => Some(4304),
-        // Version 26
-        (Version::V26, ErrorCorrection::L) => Some(10960),
-        (Version::V26, ErrorCorrection::M) => Some(8496),
-        (Version::V26, ErrorCorrection::Q) => Some(6032),
-        (Version::V26, ErrorCorrection::H) => Some(4768),
-        // Version 27
-        (Version::V27, ErrorCorrection::L) => Some(11744),
-        (Version::V27, ErrorCorrection::M) => Some(9024),
-        (Version::V27, ErrorCorrection::Q) => Some(6464),
-        (Version::V27, ErrorCorrection::H) => Some(5024),
-        // Version 28
-        (Version::V28, ErrorCorrection::L) => Some(12248),
-        (Version::V28, ErrorCorrection::M) => Some(9544),
-        (Version::V28, ErrorCorrection::Q) => Some(6968),
-        (Version::V28, ErrorCorrection::H) => Some(5288),
-        // Version 29
-        (Version::V29, ErrorCorrection::L) => Some(13048),
-        (Version::V29, ErrorCorrection::M) => Some(10136),
-        (Version::V29, ErrorCorrection::Q) => Some(7288),
-        (Version::V29, ErrorCorrection::H) => Some(5608),
-        // Version 30
-        (Version::V30, ErrorCorrection::L) => Some(13880),
-        (Version::V30, ErrorCorrection::M) => Some(10984),
-        (Version::V30, ErrorCorrection::Q) => Some(7880),
-        (Version::V30, ErrorCorrection::H) => Some(5960),
-        // Version 31
-        (Version::V31, ErrorCorrection::L) => Some(14744),
-        (Version::V31, ErrorCorrection::M) => Some(11640),
-        (Version::V31, ErrorCorrection::Q) => Some(8264),
-        (Version::V31, ErrorCorrection::H) => Some(6344),
-        // Version 32
-        (Version::V32, ErrorCorrection::L) => Some(15640),
-        (Version::V32, ErrorCorrection::M) => Some(12328),
-        (Version::V32, ErrorCorrection::Q) => Some(8920),
-        (Version::V32, ErrorCorrection::H) => Some(6760),
-        // Version 33
-        (Version::V33, ErrorCorrection::L) => Some(16568),
-        (Version::V33, ErrorCorrection::M) => Some(13048),
-        (Version::V33, ErrorCorrection::Q) => Some(9368),
-        (Version::V33, ErrorCorrection::H) => Some(7208),
-        // Version 34
-        (Version::V34, ErrorCorrection::L) => Some(17528),
-        (Version::V34, ErrorCorrection::M) => Some(13800),
-        (Version::V34, ErrorCorrection::Q) => Some(9848),
-        (Version::V34, ErrorCorrection::H) => Some(7688),
-        // Version 35
-        (Version::V35, ErrorCorrection::L) => Some(18448),
-        (Version::V35, ErrorCorrection::M) => Some(14496),
-        (Version::V35, ErrorCorrection::Q) => Some(10288),
-        (Version::V35, ErrorCorrection::H) => Some(7888),
-        // Version 36
-        (Version::V36, ErrorCorrection::L) => Some(19472),
-        (Version::V36, ErrorCorrection::M) => Some(15312),
-        (Version::V36, ErrorCorrection::Q) => Some(10832),
-        (Version::V36, ErrorCorrection::H) => Some(8432),
-        // Version 37
-        (Version::V37, ErrorCorrection::L) => Some(20528),
-        (Version::V37, ErrorCorrection::M) => Some(15936),
-        (Version::V37, ErrorCorrection::Q) => Some(11408),
-        (Version::V37, ErrorCorrection::H) => Some(8768),
-        // Version 38
-        (Version::V38, ErrorCorrection::L) => Some(21616),
-        (Version::V38, ErrorCorrection::M) => Some(16816),
-        (Version::V38, ErrorCorrection::Q) => Some(12016),
-        (Version::V38, ErrorCorrection::H) => Some(9136),
-        // Version 39
-        (Version::V39, ErrorCorrection::L) => Some(22496),
-        (Version::V39, ErrorCorrection::M) => Some(17728),
-        (Version::V39, ErrorCorrection::Q) => Some(12656),
-        (Version::V39, ErrorCorrection::H) => Some(9776),
-        // Version 40
-        (Version::V40, ErrorCorrection::L) => Some(23648),
-        (Version::V40, ErrorCorrection::M) => Some(18672),
-        (Version::V40, ErrorCorrection::Q) => Some(13328),
-        (Version::V40, ErrorCorrection::H) => Some(10208),
-    }
-}
-
-fn validate_ecc(bits: &[u8], data_bits: usize, ecc_bits: usize, ecc_level: Option<ErrorCorrection>) -> bool {
-    if bits.len() < data_bits + ecc_bits {
-        return false;
-    }
-    
-    // Convert bits to bytes
-    let mut data_bytes = Vec::new();
-    let mut ecc_bytes = Vec::new();
-    
-    // Extract data bytes
-    for i in (0..data_bits).step_by(8) {
-        if i + 8 <= data_bits {
-            let byte_val = bits_to_usize(&bits[i..i+8]) as u8;
-            data_bytes.push(byte_val);
-        }
-    }
-    
-    // Extract ECC bytes
-    for i in (data_bits..data_bits + ecc_bits).step_by(8) {
-        if i + 8 <= data_bits + ecc_bits {
-            let byte_val = bits_to_usize(&bits[i..i+8]) as u8;
-            ecc_bytes.push(byte_val);
-        }
-    }
-    
-    // Simple validation: check if we have the expected number of bytes
-    let expected_ecc_bytes = match ecc_level {
-        Some(ErrorCorrection::L) => 7,  // V1 L level
-        Some(ErrorCorrection::M) => 10, // V1 M level  
-        Some(ErrorCorrection::Q) => 13, // V1 Q level
-        Some(ErrorCorrection::H) => 17, // V1 H level
-        _ => return false,
-    };
-    
-    // For now, just validate we have the right structure
-    // Full Reed-Solomon validation would require implementing the RS algorithm
-    data_bytes.len() > 0 && ecc_bytes.len() == expected_ecc_bytes
-}
-
-fn bits_to_usize(bits: &[u8]) -> usize {
-    bits.iter().fold(0, |acc, &bit| (acc << 1) | (bit as usize))
-}
-
-#[allow(dead_code)]
-fn perform_ecc_correction(raw_bits: &[u8], version: Option<Version>, ecc_level: Option<ErrorCorrection>) -> (Vec<u8>, f64, bool) {
+#[allow(unused_variables)]
+fn perform_ecc_correction(raw_bits: &[u8], version: Option<Version>, ecc_level: Option<ErrorCorrection>) -> (Vec<u8>, f64, bool, Option<usize>) {
     if let (Some(v), Some(ecc)) = (version, ecc_level) {
         let (group1_blocks, group1_data_codewords, group2_blocks, group2_data_codewords, ecc_codewords_per_block) = 
             get_block_info(v, ecc);
@@ -1331,14 +1079,12 @@ fn perform_ecc_correction(raw_bits: &[u8], version: Option<Version>, ecc_level: 
         let total_ecc_codewords = (group1_blocks + group2_blocks) * ecc_codewords_per_block;
         
         if data_bytes.len() < total_data_codewords + total_ecc_codewords {
-            return (data_bytes, 0.0, false);
+            return (data_bytes, 0.0, false, Some(0));
         }
         
         // Deinterleave data and ECC blocks
         let mut data_blocks = Vec::new();
         let mut ecc_blocks = Vec::new();
-        
-        // Deinterleave data blocks
         for block_idx in 0..(group1_blocks + group2_blocks) {
             let block_size = if block_idx < group1_blocks { group1_data_codewords } else { group2_data_codewords };
             let mut block = Vec::new();
@@ -1375,16 +1121,22 @@ fn perform_ecc_correction(raw_bits: &[u8], version: Option<Version>, ecc_level: 
             let mut combined_block = data_block.clone();
             combined_block.extend_from_slice(ecc_block);
             
-            // Simple Reed-Solomon correction simulation
-            let (corrected_block, corrections) = simulate_reed_solomon_correction(&combined_block, data_block.len());
-            
-            corrected_data_blocks.push(corrected_block[..data_block.len()].to_vec());
-            total_corrections += corrections;
-            total_bytes += data_block.len();
-            
-            if corrections > ecc_codewords_per_block / 2 {
-                all_valid = false;
+            // Use actual Reed-Solomon correction
+            match ecc::correct_errors(&combined_block, ecc_block.len()) {
+                ecc::CorrectionResult::ErrorFree(corrected_block) => {
+                    corrected_data_blocks.push(corrected_block);
+                }
+                ecc::CorrectionResult::Corrected { data, error_positions, .. } => {
+                    let corrections = error_positions.len();
+                    total_corrections += corrections;
+                    corrected_data_blocks.push(data);
+                }
+                ecc::CorrectionResult::Uncorrectable => {
+                    corrected_data_blocks.push(data_block.clone());
+                    all_valid = false;
+                }
             }
+            total_bytes += data_block.len();
         }
         
         // Reconstruct corrected data
@@ -1405,31 +1157,48 @@ fn perform_ecc_correction(raw_bits: &[u8], version: Option<Version>, ecc_level: 
             0.0
         };
         
-        (corrected_data, correction_percentage, all_valid)
+        // Calculate bit differences for reporting
+        let original_bytes = bits_to_bytes(raw_bits);
+        let mut total_bit_corrections = 0;
+        for (orig, corr) in original_bytes.iter().zip(corrected_data.iter()) {
+            total_bit_corrections += (orig ^ corr).count_ones() as usize;
+        }
+        
+        (corrected_data, correction_percentage, all_valid, Some(total_bit_corrections))
     } else {
-        (bits_to_bytes(raw_bits), 0.0, false)
+        (bits_to_bytes(raw_bits), 0.0, false, Some(0))
     }
 }
 
-fn simulate_reed_solomon_correction(block: &[u8], data_len: usize) -> (Vec<u8>, usize) {
-    // Simple simulation: compare with expected patterns and count differences
-    let mut corrected = block.to_vec();
-    let mut corrections = 0;
+
+fn attempt_error_correction(bits: &[u8], version: Version, ecc_level: ErrorCorrection) -> Option<Vec<u8>> {
+    // Convert bits to bytes
+    let bytes = bits_to_bytes(bits);
     
-    // Basic validation: check for obvious padding patterns
-    for i in data_len..corrected.len().min(data_len + 10) {
-        if corrected[i] != 0xEC && corrected[i] != 0x11 {
-            // Simulate correction of invalid padding
-            if i % 2 == 0 {
-                corrected[i] = 0xEC;
-            } else {
-                corrected[i] = 0x11;
-            }
-            corrections += 1;
-        }
+    // Get ECC parameters
+    let total_codewords = ecc_data::get_total_codewords(version);
+    let ecc_codewords = ecc_data::get_ecc_codewords(version, ecc_level);
+    let data_codewords = total_codewords - ecc_codewords;
+    
+    if bytes.len() < total_codewords {
+        return None;
     }
     
-    (corrected, corrections)
+    // Try to correct the data
+    match ecc::correct_errors(&bytes[..total_codewords], ecc_codewords) {
+        ecc::CorrectionResult::ErrorFree(corrected_data) |
+        ecc::CorrectionResult::Corrected { data: corrected_data, .. } => {
+            // Convert back to bits
+            let mut corrected_bits = Vec::new();
+            for byte in corrected_data {
+                for i in (0..8).rev() {
+                    corrected_bits.push((byte >> i) & 1);
+                }
+            }
+            Some(corrected_bits)
+        }
+        ecc::CorrectionResult::Uncorrectable => None,
+    }
 }
 
 fn bits_to_bytes(bits: &[u8]) -> Vec<u8> {
@@ -1658,6 +1427,53 @@ fn bits_to_u8(bits: &[u8]) -> u8 {
         result |= bit << (bits.len() - 1 - i);
     }
     result
+}
+
+// Remove duplicate function
+
+fn bits_to_usize(bits: &[u8]) -> usize {
+    let mut result = 0;
+    for &bit in bits {
+        result = (result << 1) | (bit as usize);
+    }
+    result
+}
+
+fn get_total_capacity(version: Option<Version>, ecc: Option<ErrorCorrection>) -> Option<usize> {
+    // Simple approximation - in a real implementation, use proper capacity tables
+    match (version?, ecc?) {
+        (Version::V1, _) => Some(208),
+        (Version::V2, _) => Some(359),
+        _ => Some(500),
+    }
+}
+
+fn decode_corrected_data(data_bytes: &[u8]) -> Option<String> {
+    // Convert bytes to bits for decoding
+    let mut bits = Vec::new();
+    for &byte in data_bytes {
+        for i in (0..8).rev() {
+            bits.push((byte >> i) & 1);
+        }
+    }
+    
+    // Decode based on mode indicator
+    if bits.len() >= 4 {
+        let mode_bits: String = bits[0..4].iter().map(|&b| if b == 1 { '1' } else { '0' }).collect();
+        match mode_bits.as_str() {
+            "0001" => decode_numeric_bits(&bits),
+            "0010" => decode_alphanumeric_bits(&bits), 
+            "0100" => decode_byte_bits(&bits),
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
+fn validate_ecc(bits: &[u8], data_cap: usize, ecc_cap: usize, ecc_level: Option<ErrorCorrection>) -> bool {
+    // Simple validation - in a real implementation, perform actual ECC validation
+    bits.len() >= data_cap && bits.len() <= data_cap + ecc_cap
 }
 
 fn bits_to_u16(bits: &[u8]) -> u16 {

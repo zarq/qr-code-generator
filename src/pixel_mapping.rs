@@ -1,4 +1,5 @@
 use crate::types::Version;
+use crate::alignment::get_alignment_positions;
 
 /// Get all data and ECC pixel positions for a given QR code version
 pub fn get_data_ecc_positions(version: Version) -> Vec<(usize, usize)> {
@@ -66,35 +67,26 @@ pub fn is_function_module(row: usize, col: usize, size: usize) -> bool {
     }
     
     // Alignment patterns
-    let alignment_positions = get_alignment_positions(size);
-    for &pos_y in &alignment_positions {
-        for &pos_x in &alignment_positions {
-            if pos_y == 6 && pos_x == 6 { continue; } // Skip if overlaps with finder
-            if row >= pos_y.saturating_sub(2) && row <= pos_y + 2 &&
-               col >= pos_x.saturating_sub(2) && col <= pos_x + 2 {
+    let version = size_to_version(size).unwrap_or(Version::V1);
+    let alignment_positions = get_alignment_positions(version);
+    for &center_x in &alignment_positions {
+        for &center_y in &alignment_positions {
+            // Skip if overlaps with finder patterns (same logic as generator)
+            if (center_x <= 8 && center_y <= 8) ||
+               (center_x <= 8 && center_y >= size - 9) ||
+               (center_x >= size - 9 && center_y <= 8) {
+                continue;
+            }
+            
+            // Check if current position is within 5x5 alignment pattern
+            if row >= center_y.saturating_sub(2) && row <= center_y + 2 &&
+               col >= center_x.saturating_sub(2) && col <= center_x + 2 {
                 return true;
             }
         }
     }
     
     false
-}
-
-/// Get alignment pattern positions for a given size
-fn get_alignment_positions(size: usize) -> Vec<usize> {
-    match size {
-        21 => vec![], // V1 has no alignment patterns
-        25 => vec![6, 18], // V2
-        29 => vec![6, 22], // V3
-        33 => vec![6, 26], // V4
-        37 => vec![6, 30], // V5
-        41 => vec![6, 34], // V6
-        45 => vec![6, 38], // V7
-        49 => vec![6, 42], // V8
-        53 => vec![6, 46], // V9
-        57 => vec![6, 50], // V10
-        _ => vec![],
-    }
 }
 
 /// Convert version enum to size
