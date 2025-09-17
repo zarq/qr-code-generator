@@ -14,8 +14,9 @@ pub enum CorrectionResult {
 /// # Arguments
 /// * `received` - The received codeword (data + ECC)
 /// * `num_ecc_codewords` - Number of ECC codewords in the received data
+/// 
 /// # Returns
-/// A `CorrectionResult` indicating whether the data was error-free, corrected, or uncorrectable
+/// A `CorrectionResult` indicating whether the data was error-free, corrected, or uncorrectable. If the errors could be corrected, the corrected data (without ECC) is returned.
 pub fn correct_errors(received: &[u8], num_ecc_codewords: usize) -> CorrectionResult {
     if received.len() <= num_ecc_codewords {
         return CorrectionResult::Uncorrectable;
@@ -63,8 +64,11 @@ fn calculate_syndromes(received: &[u8], num_ecc_codewords: usize) -> Vec<u8> {
     let mut syndromes = vec![0u8; num_ecc_codewords];
     for i in 0..num_ecc_codewords {
         let mut syndrome = 0u8;
-        for (j, &byte) in received.iter().enumerate() {
-            syndrome = gf_add(syndrome, gf_multiply(byte, gf_exp(((i + 1) * j) % 255)));
+        let alpha = gf_exp(i % 255); // α^i (not α^(i+1))
+        
+        // Evaluate polynomial at α^i using Horner's method
+        for &byte in received.iter() {
+            syndrome = gf_add(gf_multiply(syndrome, alpha), byte);
         }
         syndromes[i] = syndrome;
     }
