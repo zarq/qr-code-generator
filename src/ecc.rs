@@ -9,6 +9,13 @@ pub enum CorrectionResult {
     Uncorrectable,
 }
 
+/// Correct errors in the received codeword using Reed-Solomon algorithm
+/// 
+/// # Arguments
+/// * `received` - The received codeword (data + ECC)
+/// * `num_ecc_codewords` - Number of ECC codewords in the received data
+/// # Returns
+/// A `CorrectionResult` indicating whether the data was error-free, corrected, or uncorrectable
 pub fn correct_errors(received: &[u8], num_ecc_codewords: usize) -> CorrectionResult {
     if received.len() <= num_ecc_codewords {
         return CorrectionResult::Uncorrectable;
@@ -19,7 +26,7 @@ pub fn correct_errors(received: &[u8], num_ecc_codewords: usize) -> CorrectionRe
     // Step 1: Calculate syndromes
     let syndromes = calculate_syndromes(received, num_ecc_codewords);
     
-    // Step 2: Check if correction is needed
+    // Step 2: Check if any correction is needed. If all the syndromes are zero, that means there are no errors.
     if syndromes.iter().all(|&s| s == 0) {
         return CorrectionResult::ErrorFree(received[..data_len].to_vec());
     }
@@ -52,7 +59,7 @@ pub fn correct_errors(received: &[u8], num_ecc_codewords: usize) -> CorrectionRe
     }
 }
 
-pub fn calculate_syndromes(received: &[u8], num_ecc_codewords: usize) -> Vec<u8> {
+fn calculate_syndromes(received: &[u8], num_ecc_codewords: usize) -> Vec<u8> {
     let mut syndromes = vec![0u8; num_ecc_codewords];
     for i in 0..num_ecc_codewords {
         let mut syndrome = 0u8;
@@ -64,7 +71,7 @@ pub fn calculate_syndromes(received: &[u8], num_ecc_codewords: usize) -> Vec<u8>
     syndromes
 }
 
-pub fn berlekamp_massey(syndromes: &[u8]) -> Vec<u8> {
+fn berlekamp_massey(syndromes: &[u8]) -> Vec<u8> {
     let mut c = vec![1u8];
     let mut b = vec![1u8];
     let mut l = 0;
@@ -105,7 +112,7 @@ pub fn berlekamp_massey(syndromes: &[u8]) -> Vec<u8> {
     c
 }
 
-pub fn chien_search(error_locator: &[u8], message_length: usize) -> Vec<usize> {
+fn chien_search(error_locator: &[u8], message_length: usize) -> Vec<usize> {
     let mut error_positions = Vec::new();
     
     for i in 0..message_length {
@@ -121,7 +128,7 @@ pub fn chien_search(error_locator: &[u8], message_length: usize) -> Vec<usize> {
     error_positions
 }
 
-pub fn forney_algorithm(syndromes: &[u8], error_positions: &[usize]) -> Vec<u8> {
+fn forney_algorithm(syndromes: &[u8], error_positions: &[usize]) -> Vec<u8> {
     let mut error_magnitudes = Vec::new();
     
     for &pos in error_positions {
@@ -200,6 +207,12 @@ pub fn generate_ecc(data: &[u8], num_ecc_codewords: usize) -> Vec<u8> {
     message[data.len()..].to_vec()
 }
 
+/// Get the generator polynomial for Reed-Solomon ECC
+/// 
+/// # Arguments
+/// * `degree` - Degree of the generator polynomial (number of ECC codewords)
+/// # Returns
+/// A vector representing the generator polynomial coefficients
 fn get_generator_polynomial(degree: usize) -> Vec<u8> {
     let mut poly = vec![1];
     
@@ -233,10 +246,10 @@ mod tests {
         
         let result = correct_errors(&codeword, 5);
         match result {
-            CorrectionResult::ErrorFree(corrected) | CorrectionResult::Corrected { data: corrected, .. } => {
+            CorrectionResult::ErrorFree(corrected) => {
                 assert_eq!(corrected, data);
             }
-            CorrectionResult::Uncorrectable => panic!("Should be correctable"),
+            _ => panic!("Data should be error free"),
         }
     }
 
@@ -257,15 +270,15 @@ mod tests {
         
         let result = correct_errors(&codeword, 5);
         match result {
-            CorrectionResult::ErrorFree(corrected) | CorrectionResult::Corrected { data: corrected, .. } => {
+            CorrectionResult::Corrected { data: corrected, .. } => {
                 assert_eq!(corrected, data);
             }
-            CorrectionResult::Uncorrectable => panic!("Should be correctable"),
+            _ => panic!("Data error should be correctable"),
         }
     }
 
     #[test]
-    fn test_ecc_franckybox() {
+    fn test_correct_ecc_is_generated_from_franckybox_pdf() {
         // qrcode.pdf, page 15
         let data = vec![32, 91, 11, 98, 56];
         let ecc = generate_ecc(&data, 10);
@@ -278,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn test_split_functions() {
+    fn test_simple_data_ecc_and_correction() {
         // Test with a simple case
         let data = vec![0x10, 0x20, 0x30];
         let ecc = generate_ecc(&data, 2);
@@ -291,14 +304,7 @@ mod tests {
                 println!("Clean data correctly identified as error-free");
                 assert_eq!(result, data);
             }
-            CorrectionResult::Corrected { data: result, error_positions, error_magnitudes: _ } => {
-                println!("Clean data corrected with {} errors", error_positions.len());
-                // This is also acceptable due to ECC mismatch
-            }
-            CorrectionResult::Uncorrectable => {
-                println!("Clean data detected as uncorrectable (expected due to ECC mismatch)");
-                // This is expected due to ECC generation/syndrome mismatch
-            }
+            _ => panic!("Should be error-free"),
         }
         
         // Introduce single error
@@ -309,12 +315,9 @@ mod tests {
             CorrectionResult::Corrected { data: result, error_positions, error_magnitudes } => {
                 println!("Error corrected at positions: {:?}", error_positions);
                 println!("Error magnitudes: {:02X?}", error_magnitudes);
-                // Note: may not correct to original due to ECC generation mismatch
+                assert_eq!(result, data, "Single error should be corrected to original data");
             }
-            CorrectionResult::Uncorrectable => {
-                println!("Single error detected as uncorrectable (expected due to ECC mismatch)");
-            }
-            _ => panic!("Should not be error-free"),
+            _ => panic!("Error should be correctable"),
         }
     }
 
