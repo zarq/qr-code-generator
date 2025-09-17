@@ -17,7 +17,7 @@ pub enum CorrectionResult {
 /// 
 /// # Returns
 /// A `CorrectionResult` indicating whether the data was error-free, corrected, or uncorrectable. If the errors could be corrected, the corrected data (without ECC) is returned.
-use reed_solomon::{Decoder, Encoder};
+use reed_solomon::{Decoder};
 
 pub fn correct_errors(received: &[u8], num_ecc_codewords: usize) -> CorrectionResult {
     if received.len() <= num_ecc_codewords {
@@ -50,35 +50,6 @@ pub fn correct_errors(received: &[u8], num_ecc_codewords: usize) -> CorrectionRe
     }
 }
 
-fn try_single_error_correction(syndromes: &[u8], message_length: usize) -> Option<(usize, u8)> {
-    if syndromes.len() < 2 || syndromes[0] == 0 {
-        return None;
-    }
-    
-    // For single error with roots α^0, α^1, ...:
-    // S0 = e (error magnitude)
-    // S1 = e * α^i (where i is error position)
-    // So α^i = S1/S0
-    let s0 = syndromes[0];
-    let s1 = syndromes[1];
-    
-    if s1 == 0 {
-        // Error at position where α^i = 1, so i = 0
-        return Some((0, s0));
-    }
-    
-    let alpha_i = gf_divide(s1, s0);
-    
-    // Find position i where α^i = alpha_i
-    for pos in 0..message_length {
-        if gf_exp(pos % 255) == alpha_i {
-            return Some((pos, s0));
-        }
-    }
-    
-    None
-}
-
 fn calculate_syndromes(received: &[u8], num_ecc_codewords: usize) -> Vec<u8> {
     let mut syndromes = vec![0u8; num_ecc_codewords];
     for i in 0..num_ecc_codewords {
@@ -92,189 +63,6 @@ fn calculate_syndromes(received: &[u8], num_ecc_codewords: usize) -> Vec<u8> {
         syndromes[i] = syndrome;
     }
     syndromes
-}
-
-fn berlekamp_massey(syndromes: &[u8]) -> Vec<u8> {
-    let n = syndromes.len();
-    let mut c = vec![0u8; n + 1];
-    let mut b = vec![0u8; n + 1];
-    c[0] = 1;
-    b[0] = 1;
-    
-    let mut l = 0;
-    let mut m = 1;
-    let mut b_val = 1u8;
-    
-    for i in 0..n {
-        let mut d = syndromes[i];
-        for j in 1..=l {
-            if i >= j {
-                d = gf_add(d, gf_multiply(c[j], syndromes[i - j]));
-            }
-        }
-        
-        if d == 0 {
-            m += 1;
-        } else {
-            let t = c.clone();
-            let coeff = gf_divide(d, b_val);
-            
-            for j in 0..=n {
-                if j + m <= n {
-                    c[j + m] = gf_add(c[j + m], gf_multiply(coeff, b[j]));
-                }
-            }
-            
-            if 2 * l <= i {
-                l = i + 1 - l;
-                b = t;
-                b_val = d;
-                m = 1;
-            } else {
-                m += 1;
-            }
-        }
-    }
-    
-    c[..=l].to_vec()
-}
-
-fn chien_search(error_locator: &[u8], message_length: usize) -> Vec<usize> {
-    let mut error_positions = Vec::new();
-    
-    // Test each position in the message
-    for i in 0..message_length {
-        let mut sum = 0u8;
-        // Evaluate error locator polynomial at α^(-i)
-        let alpha_inv = gf_exp((255 - i) % 255); // α^(-i)
-        let mut alpha_power = 1u8; // α^0
-        
-        for &coeff in error_locator.iter() {
-            sum = gf_add(sum, gf_multiply(coeff, alpha_power));
-            alpha_power = gf_multiply(alpha_power, alpha_inv);
-        }
-        
-        if sum == 0 {
-            error_positions.push(i);
-        }
-    }
-    
-    error_positions
-}
-
-fn forney_algorithm(syndromes: &[u8], error_positions: &[usize]) -> Vec<u8> {
-    let num_errors = error_positions.len();
-    if num_errors == 0 {
-        return Vec::new();
-    }
-    
-    if num_errors == 1 {
-        return vec![syndromes[0]];
-    }
-    
-    // Build error locator polynomial from positions
-    let mut error_locator = vec![1u8];
-    for &pos in error_positions {
-        let alpha_inv = gf_exp((255 - pos) % 255);
-        let mut new_poly = vec![0u8; error_locator.len() + 1];
-        
-        // Multiply by (1 - α^(-pos) * x)
-        for i in 0..error_locator.len() {
-            new_poly[i] = gf_add(new_poly[i], error_locator[i]);
-            new_poly[i + 1] = gf_add(new_poly[i + 1], gf_multiply(error_locator[i], alpha_inv));
-        }
-        error_locator = new_poly;
-    }
-    
-    // Calculate error evaluator polynomial: Ω(x) = S(x) * Λ(x) mod x^(2t)
-    let mut error_evaluator = vec![0u8; num_errors];
-    for i in 0..num_errors {
-        for j in 0..=i.min(error_locator.len() - 1) {
-            if i - j < syndromes.len() {
-                error_evaluator[i] = gf_add(error_evaluator[i], 
-                    gf_multiply(syndromes[i - j], error_locator[j]));
-            }
-        }
-    }
-    
-    // Apply Forney formula: e_i = -Ω(α^(-i)) / Λ'(α^(-i))
-    let mut magnitudes = Vec::new();
-    for &pos in error_positions {
-        let alpha_inv = gf_exp((255 - pos) % 255);
-        
-        // Evaluate error evaluator at α^(-pos)
-        let mut omega_val = 0u8;
-        for (j, &coeff) in error_evaluator.iter().enumerate() {
-            let power = gf_exp((j * (255 - pos)) % 255);
-            omega_val = gf_add(omega_val, gf_multiply(coeff, power));
-        }
-        
-        // Evaluate derivative of error locator at α^(-pos)
-        let mut lambda_deriv = 0u8;
-        for (j, &coeff) in error_locator.iter().enumerate().skip(1) {
-            if j % 2 == 1 { // Only odd powers contribute to derivative
-                let power = gf_exp(((j - 1) * (255 - pos)) % 255);
-                lambda_deriv = gf_add(lambda_deriv, gf_multiply(coeff, power));
-            }
-        }
-        
-        let magnitude = if lambda_deriv == 0 { 0 } else { 
-            gf_divide(omega_val, lambda_deriv) 
-        };
-        magnitudes.push(magnitude);
-    }
-    
-    magnitudes
-}
-
-fn gaussian_elimination(matrix: &mut [Vec<u8>], rhs: &mut [u8]) -> Vec<u8> {
-    let n = matrix.len();
-    
-    // Forward elimination
-    for i in 0..n {
-        // Find pivot
-        let mut pivot_row = i;
-        for k in (i + 1)..n {
-            if matrix[k][i] != 0 {
-                pivot_row = k;
-                break;
-            }
-        }
-        
-        if matrix[pivot_row][i] == 0 {
-            continue; // Skip if no pivot found
-        }
-        
-        // Swap rows if needed
-        if pivot_row != i {
-            matrix.swap(i, pivot_row);
-            rhs.swap(i, pivot_row);
-        }
-        
-        let pivot = matrix[i][i];
-        let pivot_inv = gf_divide(1, pivot);
-        
-        // Eliminate column
-        for k in 0..n {
-            if k != i && matrix[k][i] != 0 {
-                let factor = gf_multiply(matrix[k][i], pivot_inv);
-                for j in 0..n {
-                    matrix[k][j] = gf_add(matrix[k][j], gf_multiply(factor, matrix[i][j]));
-                }
-                rhs[k] = gf_add(rhs[k], gf_multiply(factor, rhs[i]));
-            }
-        }
-    }
-    
-    // Back substitution
-    let mut solution = vec![0u8; n];
-    for i in (0..n).rev() {
-        if matrix[i][i] != 0 {
-            solution[i] = gf_divide(rhs[i], matrix[i][i]);
-        }
-    }
-    
-    solution
 }
 
 fn gf_add(a: u8, b: u8) -> u8 {
@@ -300,19 +88,6 @@ fn gf_log(val: u8) -> usize {
         panic!("Cannot take log of 0 in GF(256)");
     }
     GF_LOG[val as usize] as usize
-}
-
-fn gf_divide(a: u8, b: u8) -> u8 {
-    if b == 0 {
-        panic!("Division by zero in GF(256)");
-    }
-    if a == 0 {
-        return 0;
-    }
-    let log_a = gf_log(a);
-    let log_b = gf_log(b);
-    let log_result = (255 + log_a - log_b) % 255;
-    gf_exp(log_result)
 }
 
 /// Generate ECC codewords for given data using Reed-Solomon algorithm

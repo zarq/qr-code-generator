@@ -673,7 +673,7 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Ver
             let mut corrected_message_bytes = corrected_data.clone();
             corrected_message_bytes.extend(&corrected_ecc);
             analysis_result.corrected_data = Some(corrected_message_bytes.iter().map(|b| format!("{:02X}", b)).collect::<Vec<String>>().join(" "));
-            let data_error_positions = zip(&unmasked_bytes, &corrected_message_bytes).enumerate().filter(|(i, (a, b))| a != b).map(|(i, _)| i).collect::<Vec<usize>>();
+            let data_error_positions = zip(&unmasked_bytes, &corrected_message_bytes).enumerate().filter(|(_i, (a, b))| a != b).map(|(i, _)| i).collect::<Vec<usize>>();
             analysis_result.reconstructed_ecc_bytes = Some(corrected_ecc.iter().map(|b| format!("{:02X}", b)).collect::<Vec<String>>().join(" "));
             analysis_result.corrupted_bytes_percentage = Some((data_error_positions.len() as f64 / (corrected_message_bytes.len() as f64)) * 100.0);
             analysis_result.data_error_positions = Some(data_error_positions);
@@ -749,83 +749,74 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Ver
 
     match data_mode {
         DataMode::Numeric => {
-            if let len = data_length {
-                let mut digits = String::new();
-                let mut bit_index = 4 + length_value_length_in_bits;
-                for _ in 0..(len / 3) {
-                    if bit_index + 10 > corrected_bit_string.len() {
-                        break;
-                    }
-                    let num_str = &corrected_bit_string[bit_index..bit_index + 10];
-                    let num = u16::from_str_radix(num_str, 2).unwrap_or(0);
-                    digits.push_str(&format!("{:03}", num));
-                    bit_index += 10;
+            let mut digits = String::new();
+            let mut bit_index = 4 + length_value_length_in_bits;
+            for _ in 0..(data_length / 3) {
+                if bit_index + 10 > corrected_bit_string.len() {
+                    break;
                 }
-                if len % 3 == 2 {
-                    if bit_index + 7 <= corrected_bit_string.len() {
-                        let num_str = &corrected_bit_string[bit_index..bit_index + 7];
-                        let num = u8::from_str_radix(num_str, 2).unwrap_or(0);
-                        digits.push_str(&format!("{:02}", num));
-                        bit_index += 7;
-                    }
-                } else if len % 3 == 1 {
-                    if bit_index + 4 <= corrected_bit_string.len() {
-                        let num_str = &corrected_bit_string[bit_index..bit_index + 4];
-                        let num = u8::from_str_radix(num_str, 2).unwrap_or(0);
-                        digits.push_str(&format!("{}", num));
-                        bit_index += 4;
-                    }
-                }
-                analysis_result.extracted_data = Some(digits);
+                let num_str = &corrected_bit_string[bit_index..bit_index + 10];
+                let num = u16::from_str_radix(num_str, 2).unwrap_or(0);
+                digits.push_str(&format!("{:03}", num));
+                bit_index += 10;
             }
+            if data_length % 3 == 2 {
+                if bit_index + 7 <= corrected_bit_string.len() {
+                    let num_str = &corrected_bit_string[bit_index..bit_index + 7];
+                    let num = u8::from_str_radix(num_str, 2).unwrap_or(0);
+                    digits.push_str(&format!("{:02}", num));
+                }
+            } else if data_length % 3 == 1 {
+                if bit_index + 4 <= corrected_bit_string.len() {
+                    let num_str = &corrected_bit_string[bit_index..bit_index + 4];
+                    let num = u8::from_str_radix(num_str, 2).unwrap_or(0);
+                    digits.push_str(&format!("{}", num));
+                }
+            }
+            analysis_result.extracted_data = Some(digits);
         }
         DataMode::Alphanumeric => {
             let alphanumeric_chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
-            if let len = data_length {
-                let mut chars = String::new();
-                let mut bit_index = 4 + length_value_length_in_bits;
-                for _ in 0..(len / 2) {
-                    if bit_index + 11 > corrected_bit_string.len() {
-                        break;
-                    }
-                    let pair_str = &corrected_bit_string[bit_index..bit_index + 11];
-                    let pair_value = u16::from_str_radix(pair_str, 2).unwrap_or(0);
-                    let first_char = alphanumeric_chars.chars().nth((pair_value / 45) as usize).unwrap_or(' ');
-                    let second_char = alphanumeric_chars.chars().nth((pair_value % 45) as usize).unwrap_or(' ');
-                    chars.push(first_char);
-                    chars.push(second_char);
-                    bit_index += 11;
+            let mut chars = String::new();
+            let mut bit_index = 4 + length_value_length_in_bits;
+            for _ in 0..(data_length / 2) {
+                if bit_index + 11 > corrected_bit_string.len() {
+                    break;
                 }
-                if len % 2 == 1 {
-                    if bit_index + 6 <= corrected_bit_string.len() {
-                        let char_str = &corrected_bit_string[bit_index..bit_index + 6];
-                        let char_value = u8::from_str_radix(char_str, 2).unwrap_or(0);
-                        let ch = alphanumeric_chars.chars().nth(char_value as usize).unwrap_or(' ');
-                        chars.push(ch);
-                        bit_index += 6;
-                    }
-                }
-                analysis_result.extracted_data = Some(chars);
+                let pair_str = &corrected_bit_string[bit_index..bit_index + 11];
+                let pair_value = u16::from_str_radix(pair_str, 2).unwrap_or(0);
+                let first_char = alphanumeric_chars.chars().nth((pair_value / 45) as usize).unwrap_or(' ');
+                let second_char = alphanumeric_chars.chars().nth((pair_value % 45) as usize).unwrap_or(' ');
+                chars.push(first_char);
+                chars.push(second_char);
+                bit_index += 11;
             }
+            if data_length % 2 == 1 {
+                if bit_index + 6 <= corrected_bit_string.len() {
+                    let char_str = &corrected_bit_string[bit_index..bit_index + 6];
+                    let char_value = u8::from_str_radix(char_str, 2).unwrap_or(0);
+                    let ch = alphanumeric_chars.chars().nth(char_value as usize).unwrap_or(' ');
+                    chars.push(ch);
+                }
+            }
+            analysis_result.extracted_data = Some(chars);
         }
         DataMode::Byte => {
-            if let len = data_length {
-                let mut bytes = Vec::new();
-                let mut bit_index = 4 + length_value_length_in_bits;
-                for _ in 0..len {
-                    if bit_index + 8 > corrected_bit_string.len() {
-                        break;
-                    }
-                    let byte_str = &corrected_bit_string[bit_index..bit_index + 8];
-                    let byte_value = u8::from_str_radix(byte_str, 2).unwrap_or(0);
-                    bytes.push(byte_value);
-                    bit_index += 8;
+            let mut bytes = Vec::new();
+            let mut bit_index = 4 + length_value_length_in_bits;
+            for _ in 0..data_length {
+                if bit_index + 8 > corrected_bit_string.len() {
+                    break;
                 }
-                if let Ok(text) = String::from_utf8(bytes.clone()) {
-                    analysis_result.extracted_data = Some(text);
-                } else {
-                    analysis_result.extracted_data = Some(format!("{:?}", bytes));
-                }
+                let byte_str = &corrected_bit_string[bit_index..bit_index + 8];
+                let byte_value = u8::from_str_radix(byte_str, 2).unwrap_or(0);
+                bytes.push(byte_value);
+                bit_index += 8;
+            }
+            if let Ok(text) = String::from_utf8(bytes.clone()) {
+                analysis_result.extracted_data = Some(text);
+            } else {
+                analysis_result.extracted_data = Some(format!("{:?}", bytes));
             }
         }
     }
@@ -982,61 +973,6 @@ fn apply_mask_to_bit(bit: u8, row: usize, col: usize, mask: MaskPattern) -> u8 {
     if mask_value { 1 - bit } else { bit }
 }
 
-fn decode_numeric_bits(bits: &[u8]) -> Option<String> {
-    let mut result = String::new();
-    let mut i = 0;
-    
-    while i + 10 <= bits.len() {
-        let value = bits_to_usize(&bits[i..i+10]);
-        if value <= 999 {
-            result.push_str(&format!("{:03}", value));
-        }
-        i += 10;
-    }
-    
-    if i + 7 <= bits.len() {
-        let value = bits_to_usize(&bits[i..i+7]);
-        if value <= 99 {
-            result.push_str(&format!("{:02}", value));
-        }
-        i += 7;
-    }
-    
-    if i + 4 <= bits.len() {
-        let value = bits_to_usize(&bits[i..i+4]);
-        if value <= 9 {
-            result.push_str(&format!("{}", value));
-        }
-    }
-    
-    Some(result)
-}
-
-fn decode_alphanumeric_bits(_bits: &[u8]) -> Option<String> {
-    Some("ALPHANUMERIC_DATA".to_string())
-}
-
-fn decode_byte_bits(bits: &[u8]) -> Option<String> {
-    let mut result = String::new();
-    let mut i = 0;
-    
-    while i + 8 <= bits.len() {
-        let byte_val = bits_to_usize(&bits[i..i+8]);
-        if byte_val <= 255 {
-            if let Some(ch) = char::from_u32(byte_val as u32) {
-                if ch.is_ascii() {
-                    result.push(ch);
-                } else {
-                    result.push('?');
-                }
-            }
-        }
-        i += 8;
-    }
-    
-    Some(result)
-}
-
 fn bits_to_bytes(bits: &[u8]) -> Vec<u8> {
     let mut bytes = Vec::new();
     for chunk in bits.chunks(8) {
@@ -1047,68 +983,6 @@ fn bits_to_bytes(bits: &[u8]) -> Vec<u8> {
         bytes.push(byte);
     }
     bytes
-}
-
-fn analyze_block_structure(version: Version, error_correction: ErrorCorrection) -> BlockStructure {
-    let (group1_blocks, group1_data_codewords, group2_blocks, group2_data_codewords, ecc_codewords_per_block) = 
-        get_block_info(version, error_correction);
-    
-    BlockStructure {
-        detected: true,
-        group1_blocks: Some(group1_blocks),
-        group1_data_codewords: Some(group1_data_codewords),
-        group2_blocks: if group2_blocks > 0 { Some(group2_blocks) } else { None },
-        group2_data_codewords: if group2_blocks > 0 { Some(group2_data_codewords) } else { None },
-        ecc_codewords_per_block: Some(ecc_codewords_per_block),
-        total_data_blocks: Some(group1_blocks + group2_blocks),
-        total_ecc_blocks: Some(group1_blocks + group2_blocks),
-    }
-}
-
-fn get_block_info(version: Version, error_correction: ErrorCorrection) -> (usize, usize, usize, usize, usize) {
-    // Returns: (num_blocks_group1, data_codewords_group1, num_blocks_group2, data_codewords_group2, ecc_codewords_per_block)
-    match (version, error_correction) {
-        // Version 1
-        (Version::V1, ErrorCorrection::L) => (1, 19, 0, 0, 7),
-        (Version::V1, ErrorCorrection::M) => (1, 16, 0, 0, 10),
-        (Version::V1, ErrorCorrection::Q) => (1, 13, 0, 0, 13),
-        (Version::V1, ErrorCorrection::H) => (1, 9, 0, 0, 17),
-        // Version 2
-        (Version::V2, ErrorCorrection::L) => (1, 34, 0, 0, 10),
-        (Version::V2, ErrorCorrection::M) => (1, 28, 0, 0, 16),
-        (Version::V2, ErrorCorrection::Q) => (1, 22, 0, 0, 22),
-        (Version::V2, ErrorCorrection::H) => (1, 16, 0, 0, 28),
-        // Version 3
-        (Version::V3, ErrorCorrection::L) => (1, 55, 0, 0, 15),
-        (Version::V3, ErrorCorrection::M) => (1, 44, 0, 0, 26),
-        (Version::V3, ErrorCorrection::Q) => (2, 17, 0, 0, 18),
-        (Version::V3, ErrorCorrection::H) => (2, 13, 0, 0, 22),
-        // Version 4
-        (Version::V4, ErrorCorrection::L) => (1, 80, 0, 0, 20),
-        (Version::V4, ErrorCorrection::M) => (2, 32, 0, 0, 18),
-        (Version::V4, ErrorCorrection::Q) => (2, 24, 0, 0, 26),
-        (Version::V4, ErrorCorrection::H) => (4, 9, 0, 0, 16),
-        _ => (1, 16, 0, 0, 10), // Default fallback
-    }
-}
-
-#[allow(dead_code)]
-fn decode_byte(_bits: &[u8]) -> Result<(DataMode, String), String> {
-    Ok((DataMode::Byte, "BYTE_DATA".to_string()))
-}
-
-#[allow(dead_code)]
-fn get_mask_bit(mask: MaskPattern, row: usize, col: usize) -> u8 {
-    match mask {
-        MaskPattern::Pattern0 => ((row + col) % 2) as u8,
-        MaskPattern::Pattern1 => (row % 2) as u8,
-        MaskPattern::Pattern2 => (col % 3) as u8,
-        MaskPattern::Pattern3 => ((row + col) % 3) as u8,
-        MaskPattern::Pattern4 => (((row / 2) + (col / 3)) % 2) as u8,
-        MaskPattern::Pattern5 => (((row * col) % 2) + ((row * col) % 3)) as u8,
-        MaskPattern::Pattern6 => ((((row * col) % 2) + ((row * col) % 3)) % 2) as u8,
-        MaskPattern::Pattern7 => ((((row + col) % 2) + ((row * col) % 3)) % 2) as u8,
-    }
 }
 
 fn analyze_version_info(matrix: &[Vec<u8>]) -> Option<VersionInfo> {
@@ -1199,53 +1073,6 @@ fn decode_format_info(format_value: u16) -> (Option<ErrorCorrection>, Option<Mas
     }
     
     (None, None, None)
-}
-
-#[allow(dead_code)]
-fn bits_to_u8(bits: &[u8]) -> u8 {
-    let mut result = 0u8;
-    for (i, &bit) in bits.iter().enumerate() {
-        result |= bit << (bits.len() - 1 - i);
-    }
-    result
-}
-
-// Remove duplicate function
-
-fn bits_to_usize(bits: &[u8]) -> usize {
-    let mut result = 0;
-    for &bit in bits {
-        result = (result << 1) | (bit as usize);
-    }
-    result
-}
-
-fn decode_corrected_data(data_bytes: &[u8]) -> Option<String> {
-    // Convert bytes to bits for decoding
-    let mut bits = Vec::new();
-    for &byte in data_bytes {
-        for i in (0..8).rev() {
-            bits.push((byte >> i) & 1);
-        }
-    }
-    
-    // Decode based on mode indicator
-    if bits.len() >= 4 {
-        let mode_bits: String = bits[0..4].iter().map(|&b| if b == 1 { '1' } else { '0' }).collect();
-        match mode_bits.as_str() {
-            "0001" => decode_numeric_bits(&bits),
-            "0010" => decode_alphanumeric_bits(&bits), 
-            "0100" => decode_byte_bits(&bits),
-            _ => None,
-        }
-    } else {
-        None
-    }
-}
-
-fn validate_ecc(bits: &[u8], data_cap: usize, ecc_cap: usize) -> bool {
-    // Simple validation - in a real implementation, perform actual ECC validation
-    bits.len() >= data_cap && bits.len() <= data_cap + ecc_cap
 }
 
 fn bits_to_u16(bits: &[u8]) -> u16 {
