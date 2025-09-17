@@ -1,7 +1,52 @@
 use crate::types::{Version, ErrorCorrection, DataMode};
 
-#[allow(dead_code)]
-pub fn get_total_codewords(version: Version) -> usize {
+pub fn image_size_to_version(size: usize) -> Option<Version> {
+    match size {
+        21 => Some(Version::V1),   // 21x21
+        25 => Some(Version::V2),   // 25x25
+        29 => Some(Version::V3),   // 29x29
+        33 => Some(Version::V4),   // 33x33
+        37 => Some(Version::V5),   // 37x37
+        41 => Some(Version::V6),   // 41x41
+        45 => Some(Version::V7),   // 45x45
+        49 => Some(Version::V8),   // 49x49
+        53 => Some(Version::V9),   // 53x53
+        57 => Some(Version::V10),  // 57x57
+        61 => Some(Version::V11),  // 61x61
+        65 => Some(Version::V12),  // 65x65
+        69 => Some(Version::V13),  // 69x69
+        73 => Some(Version::V14),  // 73x73
+        77 => Some(Version::V15),  // 77x77
+        81 => Some(Version::V16),  // 81x81
+        85 => Some(Version::V17),  // 85x85
+        89 => Some(Version::V18),  // 89x89
+        93 => Some(Version::V19),  // 93x93
+        97 => Some(Version::V20),  // 97x97
+        101 => Some(Version::V21), // 101x101
+        105 => Some(Version::V22), // 105x105
+        109 => Some(Version::V23), // 109x109
+        113 => Some(Version::V24), // 113x113
+        117 => Some(Version::V25), // 117x117
+        121 => Some(Version::V26), // 121x121
+        125 => Some(Version::V27), // 125x125
+        129 => Some(Version::V28), // 129x129
+        133 => Some(Version::V29), // 133x133
+        137 => Some(Version::V30), // 137x137
+        141 => Some(Version::V31), // 141x141
+        145 => Some(Version::V32), // 145x145
+        149 => Some(Version::V33), // 149x149
+        153 => Some(Version::V34), // 153x153
+        157 => Some(Version::V35), // 157x157
+        161 => Some(Version::V36), // 161x161
+        165 => Some(Version::V37), // 165x165
+        169 => Some(Version::V38), // 169x169
+        173 => Some(Version::V39), // 173x173
+        177 => Some(Version::V40), // 177x177
+        _ => None,
+    }
+}
+
+pub fn get_total_codewords_in_bytes(version: Version) -> usize {
     let v = version as u8;
     match v {
         1..=9 => [26, 44, 70, 100, 134, 172, 196, 242, 292][v as usize - 1],
@@ -12,8 +57,11 @@ pub fn get_total_codewords(version: Version) -> usize {
     }
 }
 
-#[allow(dead_code)]
-pub fn get_ecc_codewords(version: Version, error_correction: ErrorCorrection) -> usize {
+pub fn get_total_codewords_in_bits(version: Version) -> usize {
+    get_total_codewords_in_bytes(version) * 8
+}
+
+pub fn get_ecc_codewords_in_bytes(version: Version, error_correction: ErrorCorrection) -> usize {
     let v = version as u8;
     match error_correction {
         ErrorCorrection::L => match v {
@@ -47,7 +95,26 @@ pub fn get_ecc_codewords(version: Version, error_correction: ErrorCorrection) ->
     }
 }
 
-pub fn get_data_capacity(version: Version, error_correction: ErrorCorrection, data_mode: DataMode) -> usize {
+pub fn get_ecc_codewords_in_bits(version: Version, error_correction: ErrorCorrection) -> usize {
+    get_ecc_codewords_in_bytes(version, error_correction) * 8
+}
+
+pub fn get_data_capacity_in_bytes(version: Version, error_correction: ErrorCorrection) -> usize {
+    let total = get_total_codewords_in_bytes(version);
+    let ecc = get_ecc_codewords_in_bytes(version, error_correction);
+    total - ecc
+}
+
+pub fn get_data_capacity_in_bits(version: Version, error_correction: ErrorCorrection) -> usize {
+    let total = get_total_codewords_in_bits(version);
+    let ecc = get_ecc_codewords_in_bits(version, error_correction);
+    total - ecc
+}
+
+/// Returns the number of _bytes_ that each version can encode for the given data mode and error correction level.
+/// 
+/// This can be used to determine how much actual data can be encoded in a QR code of the specified version and error correction level.
+pub fn get_unencoded_capacity_in_bytes(version: Version, error_correction: ErrorCorrection, data_mode: DataMode) -> usize {
     let v = version as u8;
     match (data_mode, error_correction) {
         (DataMode::Numeric, ErrorCorrection::L) => match v {
@@ -117,4 +184,8 @@ pub fn get_data_capacity(version: Version, error_correction: ErrorCorrection, da
             _ => panic!("Byte H mode not supported for version V{}", v),
         },
     }
+}
+
+pub fn get_unencoded_capacity_in_bits(version: Version, error_correction: ErrorCorrection, data_mode: DataMode) -> usize {
+    get_unencoded_capacity_in_bytes(version, error_correction, data_mode) * 8
 }

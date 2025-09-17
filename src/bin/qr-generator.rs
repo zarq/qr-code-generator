@@ -1,15 +1,14 @@
 use image::{ImageBuffer, Rgb};
+use qr_tools::capacity::get_unencoded_capacity_in_bytes;
 use std::env;
 
 use qr_tools::types;
 use qr_tools::mask;
 use qr_tools::encoding;
-use qr_tools::ecc_data;
 use qr_tools::alignment;
 use types::{Version, ErrorCorrection, MaskPattern, DataMode, QrConfig, OutputFormat};
 use mask::apply_mask;
 use encoding::{encode_data, EncodedData};
-use ecc_data::get_data_capacity;
 use alignment::{is_alignment_pattern, get_alignment_positions};
 
 fn add_position_pattern(matrix: &mut Vec<Vec<u8>>, x: usize, y: usize) {
@@ -392,7 +391,7 @@ fn calculate_version(data: &str, error_correction: ErrorCorrection, data_mode: D
     // Find minimum version that can hold the data
     for version_num in 1..=40 {
         let version = Version::from_u8(version_num).unwrap_or(Version::V40);
-        let capacity = get_data_capacity(version, error_correction, data_mode);
+        let capacity = get_unencoded_capacity_in_bytes(version, error_correction, data_mode);
         if data_length <= capacity {
             return version;
         }

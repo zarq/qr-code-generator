@@ -1,3 +1,5 @@
+use std::fmt;
+
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 #[allow(dead_code)]
 pub enum Version {
@@ -41,6 +43,17 @@ pub enum DataMode {
     Numeric,
     Alphanumeric,
     Byte,
+}
+
+impl fmt::Display for DataMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mode_str = match self {
+            DataMode::Numeric => "Numeric",
+            DataMode::Alphanumeric => "Alphanumeric",
+            DataMode::Byte => "Byte",
+        };
+        write!(f, "{}", mode_str)
+    }
 }
 
 #[derive(Clone, Copy, Debug, serde::Serialize)]

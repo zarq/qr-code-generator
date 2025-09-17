@@ -1,13 +1,17 @@
 use image;
+use qr_tools::capacity::get_data_capacity_in_bits;
+use qr_tools::capacity::get_total_codewords_in_bits;
+use qr_tools::capacity::image_size_to_version;
+use qr_tools::ecc::generate_ecc;
+use qr_tools::ecc::CorrectionResult;
 use std::env;
+use std::iter::zip;
 use serde::Serialize;
 
 use qr_tools::types;
 use qr_tools::mask;
 use qr_tools::ecc;
-use qr_tools::ecc_data;
 use types::{Version, ErrorCorrection, MaskPattern, DataMode};
-use ecc_data::get_data_capacity;
 
 #[derive(Debug, Serialize)]
 struct BorderCheck {
@@ -73,26 +77,28 @@ struct DarkModule {
 struct DataAnalysis {
     decoded_bit_string: Option<String>,
     unmasked_bit_string: Option<String>,
+    unmasked_bytes: Option<String>,
     corrected_bit_string: Option<String>,
+    corrected_bytes: Option<String>,
+    expected_bit_string_size: Option<usize>,
+    actual_bit_string_size: Option<usize>,
+    expected_data_bit_string_size: Option<usize>,
+    expected_ecc_bit_string_size: Option<usize>,
     encoding_info_bit_string: Option<String>,
     encoding_name: Option<String>,
+    read_data_bytes: Option<String>,
+    read_ecc_bytes: Option<String>,
     data_length: Option<usize>,
-    data_bit_string: Option<String>,
     extracted_data: Option<String>,
     corrected_data: Option<String>,
-    data_error_positions: Option<String>,
-    data_error_magnitudes: Option<String>,
-    correction_percentage: Option<f64>,
-    ecc_bits: Option<String>,
+    message_bytes: Option<String>,
+    reconstructed_ecc_bytes: Option<String>,
+    data_error_positions: Option<Vec<usize>>,
+    corrupted_bytes_percentage: Option<f64>,
     padding_bits: Option<String>,
     data_ecc_valid: bool,
-    data_size: Option<usize>,
-    bit_string_size: Option<usize>,
-    terminator_bits: Option<usize>,
     block_structure: Option<BlockStructure>,
-    // ECC Analysis Deliverables
     data_corrupted: bool,
-    bits_corrected: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -174,25 +180,28 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
         data_analysis: DataAnalysis {
             decoded_bit_string: None,
             unmasked_bit_string: None,
+            unmasked_bytes: None,
             corrected_bit_string: None,
+            corrected_bytes: None,
+            expected_bit_string_size: None,
+            actual_bit_string_size: None,
+            expected_data_bit_string_size: None,
+            expected_ecc_bit_string_size: None,
             encoding_info_bit_string: None,
             encoding_name: None,
             data_length: None,
-            data_bit_string: None,
+            message_bytes: None,
+            reconstructed_ecc_bytes: None,
+            read_data_bytes: None,
+            read_ecc_bytes: None,
             extracted_data: None,
             corrected_data: None,
             data_error_positions: None,
-            data_error_magnitudes: None,
-            correction_percentage: None,
-            ecc_bits: None,
+            corrupted_bytes_percentage: None,
             padding_bits: None,
             data_ecc_valid: false,
-            data_size: None,
-            bit_string_size: None,
-            terminator_bits: None,
             block_structure: None,
             data_corrupted: false,
-            bits_corrected: None,
         },
         finder_patterns: Vec::new(),
         timing_patterns: TimingPatterns { valid: false },
@@ -570,25 +579,28 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Ver
     let mut analysis_result = DataAnalysis {
         decoded_bit_string: None,
         unmasked_bit_string: None,
+        unmasked_bytes: None,
+        corrected_bytes: None,
         corrected_bit_string: None,
+        expected_bit_string_size: None,
+        actual_bit_string_size: None,
+        expected_data_bit_string_size: None,
+        expected_ecc_bit_string_size: None,
         encoding_info_bit_string: None,
+        reconstructed_ecc_bytes: None,
         encoding_name: None,
         data_length: None,
-        data_bit_string: None,
+        message_bytes: None,
+        read_data_bytes: None,
+        read_ecc_bytes: None,
         extracted_data: None,
         corrected_data: None,
         data_error_positions: None,
-        data_error_magnitudes: None,
-        correction_percentage: None,
-        ecc_bits: None,
+        corrupted_bytes_percentage: None,
         padding_bits: None,
         data_ecc_valid: false,
-        data_size: None,
-        bit_string_size: None,
-        terminator_bits: None,
         block_structure: None,
         data_corrupted: true,
-        bits_corrected: None,
     };
     
     // Step 1: Read raw bit string from matrix
@@ -601,150 +613,228 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Ver
     mask::apply_mask(&mut unmasked_matrix, mask);
     let unmasked_bits = read_data_bits(&unmasked_matrix, size);
     let unmasked_bit_string = unmasked_bits.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>();
-    analysis_result.unmasked_bit_string = Some(unmasked_bit_string);
+    analysis_result.unmasked_bit_string = Some(unmasked_bit_string.clone());
     
     if unmasked_bits.len() < 8 {
         return analysis_result;
     }
+    let unmasked_bytes = bits_to_bytes(&unmasked_bits);
+    analysis_result.unmasked_bytes = Some(unmasked_bytes.iter().map(|b| format!("{:02X}", b)).collect::<Vec<String>>().join(" "));
 
     if ecc_level.is_none() {
         return analysis_result;
     }
     
     // Step 2.5: Attempt error correction or fallback to original data
-    let possibly_corrected_bits = 
-        // Try error correction, but fall back to original if it fails
-        attempt_error_correction(&unmasked_bits, version, ecc_level.unwrap());
-    if possibly_corrected_bits.is_none() {
-        // Error correction failed
-        return analysis_result;
-    }
-    let corrected_bits = possibly_corrected_bits.unwrap();
-    analysis_result.corrected_bit_string = Some(corrected_bits.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>());
-    
-    // Step 3: Analyze corrected data
-    let mode_bits = &corrected_bits[0..4];
-    let encoding_info = mode_bits.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>();
-    analysis_result.encoding_info_bit_string = Some(encoding_info.clone());
-    
-    // If mode is unknown, skip further analysis
-    if !matches!(encoding_info.as_str(), "0001" | "0010" | "0100" | "1000") {
+    let total_capacity_bits = get_total_codewords_in_bits(version);
+    analysis_result.expected_bit_string_size = Some(total_capacity_bits);
+    analysis_result.actual_bit_string_size = Some(unmasked_bits.len());
+
+    if ecc_level.is_none() {
         return analysis_result;
     }
     
-    let encoding_name = match encoding_info.as_str() {
-        "0001" => Some("Numeric".to_string()),
-        "0010" => Some("Alphanumeric".to_string()),
-        "0100" => Some("Byte".to_string()),
-        "1000" => Some("Kanji".to_string()),
-        _ => Some("Unknown".to_string()),
-    };
-    analysis_result.encoding_name = encoding_name;
-    
-    let length_bits = match encoding_info.as_str() {
-        "0001" => 10, // Numeric mode in V1 uses 10 bits for length
-        "0010" => 9,  // Alphanumeric mode in V1 uses 9 bits
-        "0100" => 8,  // Byte mode in V1 uses 8 bits
-        _ => 8,
-    };
-    let data_length = if corrected_bits.len() >= 4 + length_bits {
-        Some(bits_to_usize(&corrected_bits[4..4+length_bits]))
-    } else {
-        None
-    };
-    
-    // Step 1: Apply Reed-Solomon correction to raw unmasked data
-    let (corrected_data_bytes, correction_percentage, ecc_valid, bits_corrected) = 
-        perform_ecc_correction(&decoded_bits, Some(version), ecc_level);
-    
-    // Step 2: Always try to decode data (use corrected if available, otherwise raw)
-    let decoded_data = decode_corrected_data(&corrected_data_bytes);
-    let (extracted_data, ecc_corrected_data) = if ecc_valid {
-        // Reed-Solomon succeeded - corrected data is reliable
-        (None, decoded_data)
-    } else {
-        // Reed-Solomon failed - treat as raw data
-        (decoded_data.clone(), decoded_data)
-    };
-    
-    // ECC Analysis Deliverables
-    let data_corrupted = correction_percentage > 0.0;
-    
-    // Apply only Reed-Solomon correction
-    let _corrected_data = ecc_corrected_data.clone();
-    
-    let total_capacity = get_total_capacity(Some(version), ecc_level);
-    let data_capacity = if let (v, Some(ecc)) = (version, ecc_level) {
-        Some(get_data_capacity(v, ecc, DataMode::Byte))
-    } else {
-        None
-    };
+    let data_capacity_bits = get_data_capacity_in_bits(version, ecc_level.unwrap());
+    analysis_result.expected_data_bit_string_size = Some(data_capacity_bits);
     
     // Calculate actual boundaries based on unmasked_bits length
-    let total_bits_available = unmasked_bits.len();
-    let data_capacity_bits = data_capacity.unwrap_or(total_bits_available);
-    let total_capacity_bits = total_capacity.unwrap_or(total_bits_available);
-    let ecc_bits_expected = if total_capacity_bits > data_capacity_bits {
-        total_capacity_bits - data_capacity_bits
-    } else {
-        // Fallback: assume last 25% of bits are ECC if we can't determine capacity
-        total_bits_available / 4
-    };
-    
-    // Extract padding bits (between actual data and data capacity)
-    let data_end = std::cmp::min(total_bits_available, data_capacity_bits);
-    let padding_start = data_end;
-    let padding_end = std::cmp::min(data_capacity_bits, total_bits_available);
-    let padding_bits = if padding_end > padding_start {
-        Some(unmasked_bits[padding_start..padding_end]
-            .iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>())
-    } else {
-        None
-    };
-    
-    // Extract ECC bits (last ecc_bits_expected bits)
-    let ecc_start = total_bits_available.saturating_sub(ecc_bits_expected);
-    let ecc_end = total_bits_available;
-    let ecc_bits = if ecc_end > ecc_start && ecc_bits_expected > 0 {
-        Some(unmasked_bits[ecc_start..ecc_end]
-            .iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>())
-    } else {
-        None
-    };
-    
-    // Count terminator bits (zeros immediately after data)
-    let mut terminator_count = 0;
-    for i in data_end..std::cmp::min(data_end + 4, padding_end) {
-        if i < unmasked_bits.len() && unmasked_bits[i] == 0 {
-            terminator_count += 1;
-        } else {
-            break;
+    if data_capacity_bits > unmasked_bits.len() {
+        println!("Error: Not enough bits read. Expected {}, got {}", data_capacity_bits, unmasked_bits.len());
+        return analysis_result; // Not enough bits read
+    }
+    if data_capacity_bits % 8 != 0 {
+        println!("Error: Number of bits read is not byte-aligned: {}", data_capacity_bits);
+        return analysis_result; // Data capacity not byte-aligned
+    }
+    let ecc_bits_expected = total_capacity_bits - data_capacity_bits;
+    analysis_result.expected_ecc_bit_string_size = Some(ecc_bits_expected);
+
+    let expected_data_size_bytes = data_capacity_bits / 8;
+    let expected_ecc_size_bytes = ecc_bits_expected / 8;
+    analysis_result.read_data_bytes = Some(unmasked_bytes[0..expected_data_size_bytes].iter().map(|b| format!("{:02X}", b)).collect::<Vec<String>>().join(" "));
+    analysis_result.read_ecc_bytes = Some(unmasked_bytes[expected_data_size_bytes..expected_data_size_bytes + expected_ecc_size_bytes].iter().map(|b| format!("{:02X}", b)).collect::<Vec<String>>().join(" "));
+
+    let ecc_result = ecc::correct_errors(&unmasked_bytes, ecc_bits_expected / 8);
+    let mut corrected_data = unmasked_bytes.clone();
+    let mut corrected_bit_string = unmasked_bit_string.clone();
+    match ecc_result {
+        CorrectionResult::Uncorrectable => {
+            println!("Error: Uncorrectable errors detected in data.");
+            return analysis_result; // Correction failed, return without corrected data
+        }
+        CorrectionResult::Corrected { data, error_positions: _, error_magnitudes: _ } => {
+            analysis_result.data_ecc_valid = false;
+            corrected_data = data;
+            corrected_bit_string = bytes_to_bit_string(&corrected_data);
+            analysis_result.corrected_bit_string = Some(bytes_to_bit_string(&corrected_data));
+            analysis_result.corrected_bytes = Some(corrected_data.iter().map(|b| format!("{:02X}", b)).collect::<Vec<String>>().join(" "));
+
+            let corrected_ecc = generate_ecc(&corrected_data, ecc_bits_expected / 8);
+            let mut corrected_message_bytes = corrected_data.clone();
+            corrected_message_bytes.extend(&corrected_ecc);
+            analysis_result.corrected_data = Some(corrected_message_bytes.iter().map(|b| format!("{:02X}", b)).collect::<Vec<String>>().join(" "));
+            let data_error_positions = zip(&unmasked_bytes, &corrected_message_bytes).enumerate().filter(|(i, (a, b))| a != b).map(|(i, _)| i).collect::<Vec<usize>>();
+            analysis_result.reconstructed_ecc_bytes = Some(corrected_ecc.iter().map(|b| format!("{:02X}", b)).collect::<Vec<String>>().join(" "));
+            analysis_result.corrupted_bytes_percentage = Some((data_error_positions.len() as f64 / (corrected_message_bytes.len() as f64)) * 100.0);
+            analysis_result.data_error_positions = Some(data_error_positions);
+        }
+        CorrectionResult::ErrorFree(_) => {
+            analysis_result.data_ecc_valid = true;
         }
     }
-    
-    let _data_ecc_valid = if let (Some(data_cap), Some(total_cap)) = (data_capacity, total_capacity) {
-        validate_ecc(&unmasked_bits, data_cap, total_cap - data_cap)
-    } else {
-        false
+
+    // Step 3: Analyze corrected data
+    let mode_bits = (corrected_data[0] >> 4) & 0b1111;
+    analysis_result.encoding_info_bit_string = Some(format!("{:04b}", mode_bits));
+    let data_mode = match mode_bits {
+        0b0001 => DataMode::Numeric,
+        0b0010 => DataMode::Alphanumeric,
+        0b0100 => DataMode::Byte,
+        _ => {
+            analysis_result.encoding_name = Some("Unknown".to_string());
+            return analysis_result; // Unsupported mode for this analysis
+        },
     };
+    analysis_result.encoding_name = Some(data_mode.to_string());
     
-    // Analyze block structure
-    let _block_structure = if let (v, Some(ecc)) = (version, ecc_level) {
-        analyze_block_structure(v, ecc)
+    let length_value_length_in_bits = match data_mode {
+        DataMode::Numeric => 10, // Numeric mode in V1 uses 10 bits for length
+        DataMode::Alphanumeric => 9,  // Alphanumeric mode in V1 uses 9 bits
+        DataMode::Byte => 8,  // Byte mode in V1 uses 8 bits
+    };
+
+    let data_length = if corrected_data.len() * 8 >= 4 + length_value_length_in_bits {
+        let length_bit_string = corrected_bit_string[4..4 + length_value_length_in_bits].to_string();
+        let length_value = usize::from_str_radix(&length_bit_string, 2).unwrap_or(0);
+        length_value
     } else {
-        BlockStructure {
-            detected: false,
-            group1_blocks: None,
-            group1_data_codewords: None,
-            group2_blocks: None,
-            group2_data_codewords: None,
-            ecc_codewords_per_block: None,
-            total_data_blocks: None,
-            total_ecc_blocks: None,
+        return analysis_result;
+    };
+    analysis_result.data_length = Some(data_length);
+    let end_of_data_bits_index = 4 + length_value_length_in_bits + match data_mode {
+        DataMode::Numeric => {
+            let full_groups = data_length / 3;
+            let remainder = data_length % 3;
+            full_groups * 10 + match remainder {
+                0 => 0,
+                1 => 4,
+                2 => 7,
+                _ => 0,
+            }
         }
+        DataMode::Alphanumeric => {
+            let full_pairs = data_length / 2;
+            let remainder = data_length % 2;
+            full_pairs * 11 + match remainder {
+                0 => 0,
+                1 => 6,
+                _ => 0,
+            }
+        }
+        DataMode::Byte => data_length * 8,
     };
-    
+    analysis_result.message_bytes = Some(
+        bits_to_bytes(
+            &corrected_bit_string[4 + length_value_length_in_bits..end_of_data_bits_index]
+                .chars()
+                .map(|b: char| match b { '0' => 0, '1' => 1, _ => 0 })
+                .collect::<Vec<u8>>()
+        )
+        .iter()
+        .map(|b| format!("{:02X}", b))
+        .collect::<Vec<String>>()
+        .join(" ")
+    );
+    analysis_result.padding_bits = Some(corrected_bit_string[end_of_data_bits_index..data_capacity_bits].to_string());
+
+    match data_mode {
+        DataMode::Numeric => {
+            if let len = data_length {
+                let mut digits = String::new();
+                let mut bit_index = 4 + length_value_length_in_bits;
+                for _ in 0..(len / 3) {
+                    if bit_index + 10 > corrected_bit_string.len() {
+                        break;
+                    }
+                    let num_str = &corrected_bit_string[bit_index..bit_index + 10];
+                    let num = u16::from_str_radix(num_str, 2).unwrap_or(0);
+                    digits.push_str(&format!("{:03}", num));
+                    bit_index += 10;
+                }
+                if len % 3 == 2 {
+                    if bit_index + 7 <= corrected_bit_string.len() {
+                        let num_str = &corrected_bit_string[bit_index..bit_index + 7];
+                        let num = u8::from_str_radix(num_str, 2).unwrap_or(0);
+                        digits.push_str(&format!("{:02}", num));
+                        bit_index += 7;
+                    }
+                } else if len % 3 == 1 {
+                    if bit_index + 4 <= corrected_bit_string.len() {
+                        let num_str = &corrected_bit_string[bit_index..bit_index + 4];
+                        let num = u8::from_str_radix(num_str, 2).unwrap_or(0);
+                        digits.push_str(&format!("{}", num));
+                        bit_index += 4;
+                    }
+                }
+                analysis_result.extracted_data = Some(digits);
+            }
+        }
+        DataMode::Alphanumeric => {
+            let alphanumeric_chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
+            if let len = data_length {
+                let mut chars = String::new();
+                let mut bit_index = 4 + length_value_length_in_bits;
+                for _ in 0..(len / 2) {
+                    if bit_index + 11 > corrected_bit_string.len() {
+                        break;
+                    }
+                    let pair_str = &corrected_bit_string[bit_index..bit_index + 11];
+                    let pair_value = u16::from_str_radix(pair_str, 2).unwrap_or(0);
+                    let first_char = alphanumeric_chars.chars().nth((pair_value / 45) as usize).unwrap_or(' ');
+                    let second_char = alphanumeric_chars.chars().nth((pair_value % 45) as usize).unwrap_or(' ');
+                    chars.push(first_char);
+                    chars.push(second_char);
+                    bit_index += 11;
+                }
+                if len % 2 == 1 {
+                    if bit_index + 6 <= corrected_bit_string.len() {
+                        let char_str = &corrected_bit_string[bit_index..bit_index + 6];
+                        let char_value = u8::from_str_radix(char_str, 2).unwrap_or(0);
+                        let ch = alphanumeric_chars.chars().nth(char_value as usize).unwrap_or(' ');
+                        chars.push(ch);
+                        bit_index += 6;
+                    }
+                }
+                analysis_result.extracted_data = Some(chars);
+            }
+        }
+        DataMode::Byte => {
+            if let len = data_length {
+                let mut bytes = Vec::new();
+                let mut bit_index = 4 + length_value_length_in_bits;
+                for _ in 0..len {
+                    if bit_index + 8 > corrected_bit_string.len() {
+                        break;
+                    }
+                    let byte_str = &corrected_bit_string[bit_index..bit_index + 8];
+                    let byte_value = u8::from_str_radix(byte_str, 2).unwrap_or(0);
+                    bytes.push(byte_value);
+                    bit_index += 8;
+                }
+                if let Ok(text) = String::from_utf8(bytes.clone()) {
+                    analysis_result.extracted_data = Some(text);
+                } else {
+                    analysis_result.extracted_data = Some(format!("{:?}", bytes));
+                }
+            }
+        }
+    }
+
     analysis_result
+}
+
+fn bytes_to_bit_string(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{:08b}", byte)).collect::<Vec<String>>().join("")
 }
 
 fn read_data_bits(matrix: &[Vec<u8>], size: usize) -> Vec<u8> {
@@ -753,54 +843,12 @@ fn read_data_bits(matrix: &[Vec<u8>], size: usize) -> Vec<u8> {
     let mut going_up = true;
     
     // Determine version from size and calculate capacity
-    let version = match size {
-        21 => Some(Version::V1),   // 21x21
-        25 => Some(Version::V2),   // 25x25
-        29 => Some(Version::V3),   // 29x29
-        33 => Some(Version::V4),   // 33x33
-        37 => Some(Version::V5),   // 37x37
-        41 => Some(Version::V6),   // 41x41
-        45 => Some(Version::V7),   // 45x45
-        49 => Some(Version::V8),   // 49x49
-        53 => Some(Version::V9),   // 53x53
-        57 => Some(Version::V10),  // 57x57
-        61 => Some(Version::V11),  // 61x61
-        65 => Some(Version::V12),  // 65x65
-        69 => Some(Version::V13),  // 69x69
-        73 => Some(Version::V14),  // 73x73
-        77 => Some(Version::V15),  // 77x77
-        81 => Some(Version::V16),  // 81x81
-        85 => Some(Version::V17),  // 85x85
-        89 => Some(Version::V18),  // 89x89
-        93 => Some(Version::V19),  // 93x93
-        97 => Some(Version::V20),  // 97x97
-        101 => Some(Version::V21), // 101x101
-        105 => Some(Version::V22), // 105x105
-        109 => Some(Version::V23), // 109x109
-        113 => Some(Version::V24), // 113x113
-        117 => Some(Version::V25), // 117x117
-        121 => Some(Version::V26), // 121x121
-        125 => Some(Version::V27), // 125x125
-        129 => Some(Version::V28), // 129x129
-        133 => Some(Version::V29), // 133x133
-        137 => Some(Version::V30), // 137x137
-        141 => Some(Version::V31), // 141x141
-        145 => Some(Version::V32), // 145x145
-        149 => Some(Version::V33), // 149x149
-        153 => Some(Version::V34), // 153x153
-        157 => Some(Version::V35), // 157x157
-        161 => Some(Version::V36), // 161x161
-        165 => Some(Version::V37), // 165x165
-        169 => Some(Version::V38), // 169x169
-        173 => Some(Version::V39), // 173x173
-        177 => Some(Version::V40), // 177x177
-        _ => None,
-    };
+    let version = image_size_to_version(size);
     
     // Use minimum total capacity for the version (H level typically has lowest total)
     let max_bits = if let Some(v) = version {
         // Use H level as it typically has the minimum total capacity
-        get_total_capacity(Some(v), Some(ErrorCorrection::H)).unwrap_or(208)
+        get_total_codewords_in_bits(v)
     } else {
         usize::MAX
     };
@@ -989,141 +1037,6 @@ fn decode_byte_bits(bits: &[u8]) -> Option<String> {
     Some(result)
 }
 
-#[allow(unused_variables)]
-fn perform_ecc_correction(raw_bits: &[u8], version: Option<Version>, ecc_level: Option<ErrorCorrection>) -> (Vec<u8>, f64, bool, Option<usize>) {
-    if let (Some(v), Some(ecc)) = (version, ecc_level) {
-        let (group1_blocks, group1_data_codewords, group2_blocks, group2_data_codewords, ecc_codewords_per_block) = 
-            get_block_info(v, ecc);
-        
-        // Convert bits to bytes
-        let data_bytes = bits_to_bytes(raw_bits);
-        
-        // Split into data and ECC blocks
-        let total_data_codewords = group1_blocks * group1_data_codewords + group2_blocks * group2_data_codewords;
-        let total_ecc_codewords = (group1_blocks + group2_blocks) * ecc_codewords_per_block;
-        
-        if data_bytes.len() < total_data_codewords + total_ecc_codewords {
-            return (data_bytes, 0.0, false, Some(0));
-        }
-        
-        // Deinterleave data and ECC blocks
-        let mut data_blocks = Vec::new();
-        let mut ecc_blocks = Vec::new();
-        for block_idx in 0..(group1_blocks + group2_blocks) {
-            let block_size = if block_idx < group1_blocks { group1_data_codewords } else { group2_data_codewords };
-            let mut block = Vec::new();
-            
-            for byte_idx in 0..block_size {
-                let data_index = byte_idx * (group1_blocks + group2_blocks) + block_idx;
-                if data_index < total_data_codewords {
-                    block.push(data_bytes[data_index]);
-                }
-            }
-            data_blocks.push(block);
-        }
-        
-        // Deinterleave ECC blocks
-        for block_idx in 0..(group1_blocks + group2_blocks) {
-            let mut block = Vec::new();
-            
-            for byte_idx in 0..ecc_codewords_per_block {
-                let ecc_index = total_data_codewords + byte_idx * (group1_blocks + group2_blocks) + block_idx;
-                if ecc_index < data_bytes.len() {
-                    block.push(data_bytes[ecc_index]);
-                }
-            }
-            ecc_blocks.push(block);
-        }
-        
-        // Perform Reed-Solomon correction on each block
-        let mut corrected_data_blocks = Vec::new();
-        let mut total_corrections = 0;
-        let mut total_bytes = 0;
-        let mut all_valid = true;
-        
-        for (data_block, ecc_block) in data_blocks.iter().zip(ecc_blocks.iter()) {
-            let mut combined_block = data_block.clone();
-            combined_block.extend_from_slice(ecc_block);
-            
-            // Use actual Reed-Solomon correction
-            match ecc::correct_errors(&combined_block, ecc_block.len()) {
-                ecc::CorrectionResult::ErrorFree(corrected_block) => {
-                    corrected_data_blocks.push(corrected_block);
-                }
-                ecc::CorrectionResult::Corrected { data, error_positions, .. } => {
-                    let corrections = error_positions.len();
-                    total_corrections += corrections;
-                    corrected_data_blocks.push(data);
-                }
-                ecc::CorrectionResult::Uncorrectable => {
-                    corrected_data_blocks.push(data_block.clone());
-                    all_valid = false;
-                }
-            }
-            total_bytes += data_block.len();
-        }
-        
-        // Reconstruct corrected data
-        let mut corrected_data = Vec::new();
-        let max_block_size = corrected_data_blocks.iter().map(|b| b.len()).max().unwrap_or(0);
-        
-        for byte_idx in 0..max_block_size {
-            for block in &corrected_data_blocks {
-                if byte_idx < block.len() {
-                    corrected_data.push(block[byte_idx]);
-                }
-            }
-        }
-        
-        let correction_percentage = if total_bytes > 0 {
-            (total_corrections as f64 / total_bytes as f64) * 100.0
-        } else {
-            0.0
-        };
-        
-        // Calculate bit differences for reporting
-        let original_bytes = bits_to_bytes(raw_bits);
-        let mut total_bit_corrections = 0;
-        for (orig, corr) in original_bytes.iter().zip(corrected_data.iter()) {
-            total_bit_corrections += (orig ^ corr).count_ones() as usize;
-        }
-        
-        (corrected_data, correction_percentage, all_valid, Some(total_bit_corrections))
-    } else {
-        (bits_to_bytes(raw_bits), 0.0, false, Some(0))
-    }
-}
-
-
-fn attempt_error_correction(bits: &[u8], version: Version, ecc_level: ErrorCorrection) -> Option<Vec<u8>> {
-    // Convert bits to bytes
-    let bytes = bits_to_bytes(bits);
-    
-    // Get ECC parameters
-    let total_codewords = ecc_data::get_total_codewords(version);
-    let ecc_codewords = ecc_data::get_ecc_codewords(version, ecc_level);
-    
-    if bytes.len() < total_codewords {
-        return None;
-    }
-
-    // Try to correct the data
-    match ecc::correct_errors(&bytes[..total_codewords], ecc_codewords) {
-        ecc::CorrectionResult::ErrorFree(corrected_data) |
-        ecc::CorrectionResult::Corrected { data: corrected_data, .. } => {
-            // Convert back to bits
-            let mut corrected_bits = Vec::new();
-            for byte in corrected_data {
-                for i in (0..8).rev() {
-                    corrected_bits.push((byte >> i) & 1);
-                }
-            }
-            Some(corrected_bits)
-        }
-        ecc::CorrectionResult::Uncorrectable => None,
-    }
-}
-
 fn bits_to_bytes(bits: &[u8]) -> Vec<u8> {
     let mut bytes = Vec::new();
     for chunk in bits.chunks(8) {
@@ -1305,15 +1218,6 @@ fn bits_to_usize(bits: &[u8]) -> usize {
         result = (result << 1) | (bit as usize);
     }
     result
-}
-
-fn get_total_capacity(version: Option<Version>, ecc: Option<ErrorCorrection>) -> Option<usize> {
-    // Simple approximation - in a real implementation, use proper capacity tables
-    match (version?, ecc?) {
-        (Version::V1, _) => Some(208),
-        (Version::V2, _) => Some(359),
-        _ => Some(500),
-    }
 }
 
 fn decode_corrected_data(data_bytes: &[u8]) -> Option<String> {
