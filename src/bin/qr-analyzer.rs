@@ -18,16 +18,12 @@ struct BorderCheck {
 
 #[derive(Debug, Serialize)]
 struct QrAnalysis {
-    status: String,
     version_from_size: Option<Version>,
     version_from_format: Option<Version>,
     versions_match: bool,
     size: usize,
     error_correction: Option<ErrorCorrection>,
-    data_mode: Option<DataMode>,
     mask_pattern: Option<MaskPattern>,
-    raw_data: Option<String>,
-    decoded_text: Option<String>,
     data_analysis: DataAnalysis,
     format_info: FormatInfo,
     version_info: Option<VersionInfo>,
@@ -36,8 +32,6 @@ struct QrAnalysis {
     dark_module: DarkModule,
     alignment_patterns: Vec<AlignmentPattern>,
     border_check: BorderCheck,
-    errors: Vec<String>,
-    warnings: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -77,11 +71,13 @@ struct DarkModule {
 
 #[derive(Debug, Serialize)]
 struct DataAnalysis {
-    full_bit_string: Option<String>,
+    decoded_bit_string: Option<String>,
     unmasked_bit_string: Option<String>,
-    encoding_info: Option<String>,
-    encoding_mode: Option<String>,
+    corrected_bit_string: Option<String>,
+    encoding_info_bit_string: Option<String>,
+    encoding_name: Option<String>,
     data_length: Option<usize>,
+    data_bit_string: Option<String>,
     extracted_data: Option<String>,
     corrected_data: Option<String>,
     correction_percentage: Option<f64>,
@@ -158,16 +154,12 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
     }
     
     let mut analysis = QrAnalysis {
-        status: "success".to_string(),
         version_from_size: None,
         version_from_format: None,
         versions_match: false,
         size: inner_size,
         error_correction: None,
-        data_mode: None,
         mask_pattern: None,
-        raw_data: None,
-        decoded_text: None,
         format_info: FormatInfo {
             raw_bits_copy1: None,
             raw_bits_copy2: None,
@@ -178,11 +170,13 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
         },
         version_info: None,
         data_analysis: DataAnalysis {
-            full_bit_string: None,
+            decoded_bit_string: None,
             unmasked_bit_string: None,
-            encoding_info: None,
-            encoding_mode: None,
+            corrected_bit_string: None,
+            encoding_info_bit_string: None,
+            encoding_name: None,
             data_length: None,
+            data_bit_string: None,
             extracted_data: None,
             corrected_data: None,
             correction_percentage: None,
@@ -201,8 +195,6 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
         dark_module: DarkModule { present: false, position: (0, 0) },
         alignment_patterns: Vec::new(),
         border_check,
-        errors: Vec::new(),
-        warnings: Vec::new(),
     };
     
     // Determine version from size
@@ -248,8 +240,7 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
         173 => Some(Version::V39),
         177 => Some(Version::V40),
         _ => {
-            analysis.errors.push(format!("Unsupported QR code size: {}x{}", inner_size, inner_size));
-            None
+            panic!("Unsupported QR code size: {}x{}", inner_size, inner_size);
         }
     };
     
@@ -287,25 +278,7 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
     
     // Try to decode data
     if let Some(mask) = analysis.mask_pattern {
-        analysis.data_analysis = decode_data_comprehensive(&matrix, mask, analysis.version_from_size, analysis.error_correction);
-        analysis.data_mode = analysis.data_analysis.encoding_info.as_ref().and_then(|info| {
-            match info.chars().take(4).collect::<String>().as_str() {
-                "0001" => Some(DataMode::Numeric),
-                "0010" => Some(DataMode::Alphanumeric),
-                "0100" => Some(DataMode::Byte),
-                _ => None,
-            }
-        });
-        analysis.decoded_text = analysis.data_analysis.corrected_data.clone()
-            .or_else(|| analysis.data_analysis.extracted_data.clone());
-        analysis.raw_data = analysis.data_analysis.extracted_data.clone();
-    }
-    
-    // Set status based on errors
-    if !analysis.errors.is_empty() {
-        analysis.status = "failed".to_string();
-    } else if !analysis.warnings.is_empty() {
-        analysis.status = "partial".to_string();
+        analysis.data_analysis = decode_data_comprehensive(&matrix, mask, analysis.version_from_size.unwrap(), analysis.error_correction);
     }
     
     Ok(analysis)
@@ -587,84 +560,80 @@ fn check_alignment_pattern(matrix: &[Vec<u8>], center_x: usize, center_y: usize)
     true
 }
 
-fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Option<Version>, ecc_level: Option<ErrorCorrection>) -> DataAnalysis {
+fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Version, ecc_level: Option<ErrorCorrection>) -> DataAnalysis {
     let size = matrix.len();
+
+    let mut analysis_result = DataAnalysis {
+        decoded_bit_string: None,
+        unmasked_bit_string: None,
+        corrected_bit_string: None,
+        encoding_info_bit_string: None,
+        encoding_name: None,
+        data_length: None,
+        data_bit_string: None,
+        extracted_data: None,
+        corrected_data: None,
+        correction_percentage: None,
+        ecc_bits: None,
+        padding_bits: None,
+        data_ecc_valid: false,
+        data_size: None,
+        bit_string_size: None,
+        terminator_bits: None,
+        block_structure: None,
+        data_corrupted: true,
+        bits_corrected: None,
+    };
     
     // Step 1: Read raw bit string from matrix
-    let raw_bits = read_data_bits(matrix, size);
-    let raw_bit_string = raw_bits.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>();
+    let decoded_bits = read_data_bits(matrix, size);
+    let decoded_bit_string = decoded_bits.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>();
+    analysis_result.decoded_bit_string = Some(decoded_bit_string);
     
     // Step 2: Apply mask to matrix and read unmasked bits
     let mut unmasked_matrix = matrix.to_vec();
     mask::apply_mask(&mut unmasked_matrix, mask);
     let unmasked_bits = read_data_bits(&unmasked_matrix, size);
     let unmasked_bit_string = unmasked_bits.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>();
+    analysis_result.unmasked_bit_string = Some(unmasked_bit_string);
     
     if unmasked_bits.len() < 8 {
-        return DataAnalysis {
-            full_bit_string: Some(raw_bit_string),
-            unmasked_bit_string: Some(unmasked_bit_string),
-            encoding_info: None,
-            encoding_mode: None,
-            data_length: None,
-            extracted_data: None,
-            corrected_data: None,
-            correction_percentage: None,
-            ecc_bits: None,
-            padding_bits: None,
-            data_ecc_valid: false,
-            data_size: None,
-            bit_string_size: Some(raw_bits.len()),
-            terminator_bits: None,
-            block_structure: None,
-            data_corrupted: false,
-            bits_corrected: None,
-        };
+        return analysis_result;
+    }
+
+    if ecc_level.is_none() {
+        return analysis_result;
     }
     
     // Step 2.5: Attempt error correction or fallback to original data
-    let corrected_bits = if let (Some(v), Some(ecc)) = (version, ecc_level) {
+    let possibly_corrected_bits = 
         // Try error correction, but fall back to original if it fails
-        attempt_error_correction(&unmasked_bits, v, ecc).unwrap_or_else(|| {
-            // If Reed-Solomon error correction fails, return original bits
-            unmasked_bits.clone()
-        })
-    } else {
-        unmasked_bits.clone()
-    };
+        attempt_error_correction(&unmasked_bits, version, ecc_level.unwrap());
+    if possibly_corrected_bits.is_none() {
+        // Error correction failed
+        return analysis_result;
+    }
+    let corrected_bits = possibly_corrected_bits.unwrap();
+    analysis_result.corrected_bit_string = Some(corrected_bits.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>());
     
     // Step 3: Analyze corrected data
     let mode_bits = &corrected_bits[0..4];
     let mut encoding_info = mode_bits.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>();
+    analysis_result.encoding_info_bit_string = Some(encoding_info.clone());
     
-    // If mode is unknown, try to correct it
+    // If mode is unknown, skip further analysis
     if !matches!(encoding_info.as_str(), "0001" | "0010" | "0100" | "1000") {
-        // Try to find the closest valid mode
-        let valid_modes = [("0001", "Numeric"), ("0010", "Alphanumeric"), ("0100", "Byte"), ("1000", "Kanji")];
-        let mut best_mode = encoding_info.clone();
-        let mut min_diff = 4;
-        
-        for (mode, _) in &valid_modes {
-            let diff = encoding_info.chars().zip(mode.chars()).filter(|(a, b)| a != b).count();
-            if diff < min_diff {
-                min_diff = diff;
-                best_mode = mode.to_string();
-            }
-        }
-        
-        // If we found a close match (1-2 bit errors), use it
-        if min_diff <= 2 {
-            encoding_info = best_mode;
-        }
+        return analysis_result;
     }
     
-    let encoding_mode = match encoding_info.as_str() {
+    let encoding_name = match encoding_info.as_str() {
         "0001" => Some("Numeric".to_string()),
         "0010" => Some("Alphanumeric".to_string()),
         "0100" => Some("Byte".to_string()),
         "1000" => Some("Kanji".to_string()),
         _ => Some("Unknown".to_string()),
     };
+    analysis_result.encoding_name = encoding_name;
     
     let length_bits = match encoding_info.as_str() {
         "0001" => 10, // Numeric mode in V1 uses 10 bits for length
@@ -680,7 +649,7 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
     
     // Step 1: Apply Reed-Solomon correction to raw unmasked data
     let (corrected_data_bytes, correction_percentage, ecc_valid, bits_corrected) = 
-        perform_ecc_correction(&raw_bits, version, ecc_level);
+        perform_ecc_correction(&decoded_bits, Some(version), ecc_level);
     
     // Step 2: Always try to decode data (use corrected if available, otherwise raw)
     let decoded_data = decode_corrected_data(&corrected_data_bytes);
@@ -698,8 +667,8 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
     // Apply only Reed-Solomon correction
     let _corrected_data = ecc_corrected_data.clone();
     
-    let total_capacity = get_total_capacity(version, ecc_level);
-    let data_capacity = if let (Some(v), Some(ecc)) = (version, ecc_level) {
+    let total_capacity = get_total_capacity(Some(version), ecc_level);
+    let data_capacity = if let (v, Some(ecc)) = (version, ecc_level) {
         Some(get_data_capacity(v, ecc, DataMode::Byte))
     } else {
         None
@@ -754,7 +723,7 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
     };
     
     // Analyze block structure
-    let _block_structure = if let (Some(v), Some(ecc)) = (version, ecc_level) {
+    let _block_structure = if let (v, Some(ecc)) = (version, ecc_level) {
         analyze_block_structure(v, ecc)
     } else {
         BlockStructure {
@@ -769,39 +738,7 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
         }
     };
     
-    DataAnalysis {
-        full_bit_string: Some(raw_bit_string),
-        unmasked_bit_string: Some(unmasked_bit_string),
-        encoding_info: Some(encoding_info),
-        encoding_mode,
-        data_length,
-        extracted_data,
-        corrected_data: ecc_corrected_data,
-        correction_percentage: Some(correction_percentage),
-        ecc_bits,
-        padding_bits,
-        data_ecc_valid: ecc_valid,
-        data_size: data_length,
-        bit_string_size: Some(raw_bits.len()),
-        terminator_bits: Some(terminator_count),
-        block_structure: Some(if let (Some(v), Some(ecc)) = (version, ecc_level) {
-            analyze_block_structure(v, ecc)
-        } else {
-            BlockStructure {
-                detected: false,
-                group1_blocks: None,
-                group1_data_codewords: None,
-                group2_blocks: None,
-                group2_data_codewords: None,
-                ecc_codewords_per_block: None,
-                total_data_blocks: None,
-                total_ecc_blocks: None,
-            }
-        }),
-        // ECC Analysis Deliverables
-        data_corrupted,
-        bits_corrected,
-    }
+    analysis_result
 }
 
 fn read_data_bits(matrix: &[Vec<u8>], size: usize) -> Vec<u8> {
@@ -1163,7 +1100,7 @@ fn attempt_error_correction(bits: &[u8], version: Version, ecc_level: ErrorCorre
     if bytes.len() < total_codewords {
         return None;
     }
-    
+
     // Try to correct the data
     match ecc::correct_errors(&bytes[..total_codewords], ecc_codewords) {
         ecc::CorrectionResult::ErrorFree(corrected_data) |
