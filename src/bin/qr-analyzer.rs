@@ -80,6 +80,8 @@ struct DataAnalysis {
     data_bit_string: Option<String>,
     extracted_data: Option<String>,
     corrected_data: Option<String>,
+    data_error_positions: Option<String>,
+    data_error_magnitudes: Option<String>,
     correction_percentage: Option<f64>,
     ecc_bits: Option<String>,
     padding_bits: Option<String>,
@@ -179,6 +181,8 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
             data_bit_string: None,
             extracted_data: None,
             corrected_data: None,
+            data_error_positions: None,
+            data_error_magnitudes: None,
             correction_percentage: None,
             ecc_bits: None,
             padding_bits: None,
@@ -573,6 +577,8 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Ver
         data_bit_string: None,
         extracted_data: None,
         corrected_data: None,
+        data_error_positions: None,
+        data_error_magnitudes: None,
         correction_percentage: None,
         ecc_bits: None,
         padding_bits: None,
@@ -618,7 +624,7 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Ver
     
     // Step 3: Analyze corrected data
     let mode_bits = &corrected_bits[0..4];
-    let mut encoding_info = mode_bits.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>();
+    let encoding_info = mode_bits.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>();
     analysis_result.encoding_info_bit_string = Some(encoding_info.clone());
     
     // If mode is unknown, skip further analysis
