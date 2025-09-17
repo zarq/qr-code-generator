@@ -2,10 +2,10 @@ use image;
 use std::env;
 use serde::Serialize;
 
-mod types;
-mod mask;
-mod ecc;
-mod ecc_data;
+use qr_tools::types;
+use qr_tools::mask;
+use qr_tools::ecc;
+use qr_tools::ecc_data;
 use types::{Version, ErrorCorrection, MaskPattern, DataMode};
 use ecc_data::get_data_capacity;
 
@@ -678,16 +678,6 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
         None
     };
     
-    let data_start = 4 + length_bits;
-    let data_bits_needed = match encoding_info.as_str() {
-        "0001" => data_length.map(|len| len * 10 / 3 + if len % 3 > 0 { 1 } else { 0 }).unwrap_or(0),
-        "0010" => data_length.map(|len| len * 11 / 2 + if len % 2 > 0 { 1 } else { 0 }).unwrap_or(0),
-        "0100" => data_length.map(|len| len * 8).unwrap_or(0),
-        _ => 0,
-    };
-    
-    // Remove old extraction logic - Reed-Solomon handles this now
-    
     // Step 1: Apply Reed-Solomon correction to raw unmasked data
     let (corrected_data_bytes, correction_percentage, ecc_valid, bits_corrected) = 
         perform_ecc_correction(&raw_bits, version, ecc_level);
@@ -758,7 +748,7 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Opt
     }
     
     let _data_ecc_valid = if let (Some(data_cap), Some(total_cap)) = (data_capacity, total_capacity) {
-        validate_ecc(&unmasked_bits, data_cap, total_cap - data_cap, ecc_level)
+        validate_ecc(&unmasked_bits, data_cap, total_cap - data_cap)
     } else {
         false
     };
@@ -1001,15 +991,6 @@ fn apply_mask_to_bit(bit: u8, row: usize, col: usize, mask: MaskPattern) -> u8 {
     if mask_value { 1 - bit } else { bit }
 }
 
-fn decode_data_bits(bits: &[u8], encoding_info: &str) -> Option<String> {
-    match encoding_info {
-        "0001" => decode_numeric_bits(bits),
-        "0010" => decode_alphanumeric_bits(bits), 
-        "0100" => decode_byte_bits(bits),
-        _ => None,
-    }
-}
-
 fn decode_numeric_bits(bits: &[u8]) -> Option<String> {
     let mut result = String::new();
     let mut i = 0;
@@ -1178,7 +1159,6 @@ fn attempt_error_correction(bits: &[u8], version: Version, ecc_level: ErrorCorre
     // Get ECC parameters
     let total_codewords = ecc_data::get_total_codewords(version);
     let ecc_codewords = ecc_data::get_ecc_codewords(version, ecc_level);
-    let data_codewords = total_codewords - ecc_codewords;
     
     if bytes.len() < total_codewords {
         return None;
@@ -1226,61 +1206,6 @@ fn analyze_block_structure(version: Version, error_correction: ErrorCorrection) 
         ecc_codewords_per_block: Some(ecc_codewords_per_block),
         total_data_blocks: Some(group1_blocks + group2_blocks),
         total_ecc_blocks: Some(group1_blocks + group2_blocks),
-    }
-}
-
-fn decode_data_from_bytes(data_bytes: &[u8]) -> Result<(DataMode, String), String> {
-    if data_bytes.len() < 2 {
-        return Err("Insufficient data".to_string());
-    }
-    
-    // Convert bytes back to bits for mode detection
-    let mut bits = Vec::new();
-    for &byte in data_bytes {
-        for i in 0..8 {
-            bits.push((byte >> (7 - i)) & 1);
-        }
-    }
-    
-    if bits.len() < 4 {
-        return Err("Insufficient bits for mode".to_string());
-    }
-    
-    // Read mode indicator
-    let mode_bits = &bits[0..4];
-    let mode = match bits_to_u8(mode_bits) {
-        1 => DataMode::Numeric,
-        2 => DataMode::Alphanumeric,
-        4 => DataMode::Byte,
-        _ => return Err("Unknown data mode".to_string()),
-    };
-    
-    // Simple decode based on mode
-    match mode {
-        DataMode::Byte => {
-            if bits.len() < 12 {
-                return Err("Insufficient bits for byte mode".to_string());
-            }
-            let length = bits_to_u8(&bits[4..12]) as usize;
-            let data_start = 12;
-            let data_end = data_start + length * 8;
-            
-            if bits.len() < data_end {
-                return Err("Insufficient data bits".to_string());
-            }
-            
-            let mut text = String::new();
-            for i in (data_start..data_end).step_by(8) {
-                if i + 8 <= bits.len() {
-                    let byte = bits_to_u8(&bits[i..i+8]);
-                    if byte.is_ascii() && byte >= 32 {
-                        text.push(byte as char);
-                    }
-                }
-            }
-            Ok((DataMode::Byte, text))
-        },
-        _ => Ok((mode, "DECODED_DATA".to_string())),
     }
 }
 
@@ -1471,7 +1396,7 @@ fn decode_corrected_data(data_bytes: &[u8]) -> Option<String> {
     }
 }
 
-fn validate_ecc(bits: &[u8], data_cap: usize, ecc_cap: usize, ecc_level: Option<ErrorCorrection>) -> bool {
+fn validate_ecc(bits: &[u8], data_cap: usize, ecc_cap: usize) -> bool {
     // Simple validation - in a real implementation, perform actual ECC validation
     bits.len() >= data_cap && bits.len() <= data_cap + ecc_cap
 }

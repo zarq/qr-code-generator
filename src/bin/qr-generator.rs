@@ -1,12 +1,11 @@
 use image::{ImageBuffer, Rgb};
 use std::env;
 
-mod types;
-mod mask;
-mod encoding;
-mod ecc;
-mod ecc_data;
-mod alignment;
+use qr_tools::types;
+use qr_tools::mask;
+use qr_tools::encoding;
+use qr_tools::ecc_data;
+use qr_tools::alignment;
 use types::{Version, ErrorCorrection, MaskPattern, DataMode, QrConfig, OutputFormat};
 use mask::apply_mask;
 use encoding::{encode_data, EncodedData};

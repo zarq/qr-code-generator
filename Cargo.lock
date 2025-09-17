@@ -272,7 +272,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "qr-generator"
+name = "qr-tools"
 version = "0.1.0"
 dependencies = [
  "image",

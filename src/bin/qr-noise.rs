@@ -3,7 +3,7 @@ use std::env;
 use std::process;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
-use qr_generator::pixel_mapping::{get_data_ecc_positions, size_to_version};
+use qr_tools::pixel_mapping::{get_data_ecc_positions, size_to_version};
 
 fn main() {
     let args: Vec<String> = env::args().collect();

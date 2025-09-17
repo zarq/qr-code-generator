@@ -68,7 +68,6 @@ pub fn berlekamp_massey(syndromes: &[u8]) -> Vec<u8> {
     let mut c = vec![1u8];
     let mut b = vec![1u8];
     let mut l = 0;
-    let mut m = 1;
     let mut b_val = 1u8;
     
     for n in 0..syndromes.len() {
@@ -95,7 +94,6 @@ pub fn berlekamp_massey(syndromes: &[u8]) -> Vec<u8> {
             if 2 * l <= n {
                 l = n + 1 - l;
                 b = t;
-                m = n + 1;
                 b_val = d;
             }
         }
@@ -127,8 +125,6 @@ pub fn forney_algorithm(syndromes: &[u8], error_positions: &[usize]) -> Vec<u8> 
     let mut error_magnitudes = Vec::new();
     
     for &pos in error_positions {
-        let x_inv = gf_exp((255 - pos) % 255);
-        
         // Calculate error magnitude using simplified Forney formula
         let mut numerator = 0u8;
         for (i, &syndrome) in syndromes.iter().enumerate() {
@@ -226,13 +222,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_ecc_simple() {
+    fn test_ecc_uncorrupted_should_work() {
         let data = vec![0x41, 0x42, 0x43, 0x44, 0x45];
         let ecc = generate_ecc(&data, 5);
         println!("Data: {:02X?}", data);
         println!("ECC:  {:02X?}", ecc);
         
         let mut codeword = data.clone();
+        codeword.extend_from_slice(&ecc);
+        
+        let result = correct_errors(&codeword, 5);
+        match result {
+            CorrectionResult::ErrorFree(corrected) | CorrectionResult::Corrected { data: corrected, .. } => {
+                assert_eq!(corrected, data);
+            }
+            CorrectionResult::Uncorrectable => panic!("Should be correctable"),
+        }
+    }
+
+    #[test]
+    fn test_ecc_one_bit_corruption_is_correctable() {
+        let data = vec![0x41, 0x42, 0x43, 0x44, 0x45];
+        let ecc = generate_ecc(&data, 5);
+        println!("Data: {:02X?}", data);
+        println!("ECC:  {:02X?}", ecc);
+        let corrupted = {
+            let mut c = data.clone();
+            c[1] ^= 0x08; // Introduce a single-bit error
+            c
+        };
+        
+        let mut codeword = corrupted.clone();
         codeword.extend_from_slice(&ecc);
         
         let result = correct_errors(&codeword, 5);
@@ -271,7 +291,7 @@ mod tests {
                 println!("Clean data correctly identified as error-free");
                 assert_eq!(result, data);
             }
-            CorrectionResult::Corrected { data: result, error_positions, error_magnitudes } => {
+            CorrectionResult::Corrected { data: result, error_positions, error_magnitudes: _ } => {
                 println!("Clean data corrected with {} errors", error_positions.len());
                 // This is also acceptable due to ECC mismatch
             }

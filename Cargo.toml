@@ -1,15 +1,23 @@
 [package]
-name = "qr-generator"
+name = "qr-tools"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "qr_tools"
+path = "src/lib.rs"
+crate-type = ["lib"]
+bench = false
+test = true
+doc = true
+
 [[bin]]
 name = "qr-generator"
-path = "src/main.rs"
+path = "src/bin/qr-generator.rs"
 
 [[bin]]
 name = "qr-analyzer"
-path = "src/analyzer.rs"
+path = "src/bin/qr-analyzer.rs"
 
 [[bin]]
 name = "qr-noise"
