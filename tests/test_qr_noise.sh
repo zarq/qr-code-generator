@@ -21,7 +21,7 @@ if [ $VERSION -le 10 ]; then
         9) TEST_DATA="$(printf 'A%.0s' {1..160})" ;;
         10) TEST_DATA="$(printf 'A%.0s' {1..213})" ;;
     esac
-    ./target/debug/qr-generator --byte-mode --data "$TEST_DATA" -o "test_v${VERSION}.png" >/dev/null 2>&1
+    ./target/debug/qr-generator -b "$TEST_DATA" -o "test_v${VERSION}.png" >/dev/null 2>&1
 else
     case $VERSION in
         11) TEST_DATA="$(printf "%0603d" 1)" ;;
@@ -29,7 +29,7 @@ else
         20) TEST_DATA="$(printf "%01599d" 1)" ;;
         *) echo "Version $VERSION not configured for test"; exit 1 ;;
     esac
-    ./target/debug/qr-generator --numeric --data "$TEST_DATA" -o "test_v${VERSION}.png" >/dev/null 2>&1
+    ./target/debug/qr-generator -n "$TEST_DATA" -o "test_v${VERSION}.png" >/dev/null 2>&1
 fi
 
 if [ ! -f "test_v${VERSION}.png" ]; then

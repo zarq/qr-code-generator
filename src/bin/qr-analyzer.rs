@@ -98,7 +98,6 @@ struct DataAnalysis {
     padding_bits: Option<String>,
     data_ecc_valid: bool,
     block_structure: Option<BlockStructure>,
-    data_corrupted: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -201,7 +200,6 @@ fn analyze_qr_code(filename: &str) -> Result<QrAnalysis, Box<dyn std::error::Err
             padding_bits: None,
             data_ecc_valid: false,
             block_structure: None,
-            data_corrupted: false,
         },
         finder_patterns: Vec::new(),
         timing_patterns: TimingPatterns { valid: false },
@@ -610,7 +608,6 @@ fn decode_data_comprehensive(matrix: &[Vec<u8>], mask: MaskPattern, version: Ver
         padding_bits: None,
         data_ecc_valid: false,
         block_structure: None,
-        data_corrupted: true,
     };
     
     // Step 1: Read raw bit string from matrix

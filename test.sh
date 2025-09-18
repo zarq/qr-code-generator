@@ -16,6 +16,44 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+# UX Tests for filename extension handling
+echo -e "${YELLOW}=== Running UX Tests ===${NC}"
+
+# Test 1: No extension + PNG format (default)
+echo -e "${YELLOW}Test 1: No extension + PNG format${NC}"
+./target/debug/qr-generator -o test_png 'Hello' > /dev/null 2>&1
+if [ -f "test_png.png" ]; then
+    echo -e "${GREEN}✓ PNG extension added correctly${NC}"
+    rm -f test_png.png
+else
+    echo -e "${RED}✗ PNG extension not added${NC}"
+    exit 1
+fi
+
+# Test 2: No extension + SVG format
+echo -e "${YELLOW}Test 2: No extension + SVG format${NC}"
+./target/debug/qr-generator -o test_svg -f svg 'Hello' > /dev/null 2>&1
+if [ -f "test_svg.svg" ]; then
+    echo -e "${GREEN}✓ SVG extension added correctly${NC}"
+    rm -f test_svg.svg
+else
+    echo -e "${RED}✗ SVG extension not added${NC}"
+    exit 1
+fi
+
+# Test 3: Explicit extension preserved
+echo -e "${YELLOW}Test 3: Explicit extension preserved${NC}"
+./target/debug/qr-generator -o test_explicit.png -f svg 'Hello' > /dev/null 2>&1
+if [ -f "test_explicit.png" ]; then
+    echo -e "${GREEN}✓ Explicit extension preserved${NC}"
+    rm -f test_explicit.png
+else
+    echo -e "${RED}✗ Explicit extension not preserved${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}All UX tests passed!${NC}"
+
 # Make test scripts executable
 chmod +x tests/run_tests.sh
 chmod +x tests/test_all_noise.sh

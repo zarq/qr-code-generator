@@ -6,7 +6,7 @@ pub fn get_data_ecc_positions(version: Version) -> Vec<(usize, usize)> {
     let size = version_to_size(version);
     let mut positions = Vec::new();
     
-    // Read data in zigzag pattern (right to left, alternating up/down)
+    // QR code data placement: right to left, alternating up/down
     let mut col = size - 1;
     let mut going_up = true;
     
@@ -17,18 +17,21 @@ pub fn get_data_ecc_positions(version: Version) -> Vec<(usize, usize)> {
             continue;
         }
         
-        // Process two columns at a time
-        for c in [col, col - 1] {
-            let rows: Vec<usize> = if going_up {
-                (0..size).rev().collect()
-            } else {
-                (0..size).collect()
-            };
-            
-            for row in rows {
-                if !is_function_module(row, c, size) {
-                    positions.push((row, c));
-                }
+        // Process column pair (right column first, then left column)
+        let rows: Vec<usize> = if going_up {
+            (0..size).rev().collect()
+        } else {
+            (0..size).collect()
+        };
+        
+        for row in rows {
+            // Right column first
+            if !is_function_module(row, col, size) {
+                positions.push((row, col));
+            }
+            // Then left column
+            if col > 0 && !is_function_module(row, col - 1, size) {
+                positions.push((row, col - 1));
             }
         }
         

@@ -78,7 +78,7 @@ impl MaskPattern {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[allow(dead_code)]
 pub enum OutputFormat {
     Png,
@@ -91,6 +91,7 @@ pub struct QrConfig {
     pub data_mode: DataMode,
     pub mask_pattern: MaskPattern,
     pub skip_mask: bool,
+    pub scale: usize,
     pub output_filename: String,
     pub output_format: OutputFormat,
     pub data: String,
@@ -104,6 +105,7 @@ impl Default for QrConfig {
             data_mode: DataMode::Byte,
             mask_pattern: MaskPattern::Pattern0,
             skip_mask: false,
+            scale: 1,
             output_filename: "qr-code.png".to_string(),
             output_format: OutputFormat::Png,
             data: "https://www.example.com/".to_string(),

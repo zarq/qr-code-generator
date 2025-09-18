@@ -17,7 +17,7 @@ pub enum CorrectionResult {
 /// 
 /// # Returns
 /// A `CorrectionResult` indicating whether the data was error-free, corrected, or uncorrectable. If the errors could be corrected, the corrected data (without ECC) is returned.
-use reed_solomon::{Decoder};
+use reed_solomon::{Decoder, Encoder};
 
 pub fn correct_errors(received: &[u8], num_ecc_codewords: usize) -> CorrectionResult {
     if received.len() <= num_ecc_codewords {
@@ -26,118 +26,32 @@ pub fn correct_errors(received: &[u8], num_ecc_codewords: usize) -> CorrectionRe
     
     let data_len = received.len() - num_ecc_codewords;
     
-    // Step 1: Check if data is already error-free using our syndrome calculation
-    let syndromes = calculate_syndromes(received, num_ecc_codewords);
-    if syndromes.iter().all(|&s| s == 0) {
-        return CorrectionResult::ErrorFree(received[..data_len].to_vec());
-    }
-    
-    println!("Non-zero syndromes detected: {:02X?}", syndromes);
-    
-    // Step 2: Use reed-solomon crate for correction
+    // Use reed-solomon crate for correction
     let decoder = Decoder::new(num_ecc_codewords);
     let mut buffer = received.to_vec();
     
     match decoder.correct(&mut buffer, None) {
         Ok(corrected_buffer) => {
-            CorrectionResult::Corrected {
-                data: corrected_buffer.data()[..data_len].to_vec(),
-                error_positions: vec![], // Library doesn't expose positions
-                error_magnitudes: vec![],
+            // Check if any correction was needed
+            if corrected_buffer.data() == &received[..data_len] {
+                CorrectionResult::ErrorFree(received[..data_len].to_vec())
+            } else {
+                CorrectionResult::Corrected {
+                    data: corrected_buffer.data()[..data_len].to_vec(),
+                    error_positions: vec![], // Library doesn't expose positions
+                    error_magnitudes: vec![],
+                }
             }
         }
         Err(_) => CorrectionResult::Uncorrectable,
     }
 }
 
-fn calculate_syndromes(received: &[u8], num_ecc_codewords: usize) -> Vec<u8> {
-    let mut syndromes = vec![0u8; num_ecc_codewords];
-    for i in 0..num_ecc_codewords {
-        let mut syndrome = 0u8;
-        let alpha = gf_exp(i % 255); // α^i to match generator polynomial roots
-        
-        // Evaluate polynomial at α^i using Horner's method
-        for &byte in received.iter() {
-            syndrome = gf_add(gf_multiply(syndrome, alpha), byte);
-        }
-        syndromes[i] = syndrome;
-    }
-    syndromes
-}
-
-fn gf_add(a: u8, b: u8) -> u8 {
-    a ^ b
-}
-
-fn gf_multiply(a: u8, b: u8) -> u8 {
-    if a == 0 || b == 0 {
-        return 0;
-    }
-    let log_a = gf_log(a);
-    let log_b = gf_log(b);
-    let log_result = (log_a + log_b) % 255;
-    gf_exp(log_result)
-}
-
-fn gf_exp(exp: usize) -> u8 {
-    GF_EXP[exp % 255]
-}
-
-fn gf_log(val: u8) -> usize {
-    if val == 0 {
-        panic!("Cannot take log of 0 in GF(256)");
-    }
-    GF_LOG[val as usize] as usize
-}
-
-/// Generate ECC codewords for given data using Reed-Solomon algorithm
-/// 
-/// # Arguments
-/// * `data` - The input data bytes
-/// * `num_ecc_codewords` - Number of ECC codewords to generate
-/// # Returns
-/// A vector containing _only_ the ECC codewords
 pub fn generate_ecc(data: &[u8], num_ecc_codewords: usize) -> Vec<u8> {
-    let generator = get_generator_polynomial(num_ecc_codewords);
-    
-    let mut message = data.to_vec();
-    message.resize(data.len() + num_ecc_codewords, 0);
-    
-    for i in 0..data.len() {
-        let coeff = message[i];
-        if coeff != 0 {
-            for j in 0..generator.len() {
-                message[i + j] = gf_add(message[i + j], gf_multiply(generator[j], coeff));
-            }
-        }
-    }
-    
-    message[data.len()..].to_vec()
+    let encoder = Encoder::new(num_ecc_codewords);
+    let encoded = encoder.encode(data);
+    encoded.ecc().to_vec()
 }
-
-/// Get the generator polynomial for Reed-Solomon ECC
-/// 
-/// # Arguments
-/// * `degree` - Degree of the generator polynomial (number of ECC codewords)
-/// # Returns
-/// A vector representing the generator polynomial coefficients
-fn get_generator_polynomial(degree: usize) -> Vec<u8> {
-    let mut poly = vec![1];
-    
-    // Use consecutive roots starting from α^0 (QR code standard)
-    for i in 0..degree {
-        let mut new_poly = vec![0; poly.len() + 1];
-        for j in 0..poly.len() {
-            new_poly[j] = gf_add(new_poly[j], poly[j]);
-            new_poly[j + 1] = gf_add(new_poly[j + 1], gf_multiply(poly[j], gf_exp(i)));
-        }
-        poly = new_poly;
-    }
-    
-    poly
-}
-
-include!(concat!(env!("OUT_DIR"), "/gf_tables.rs"));
 
 #[cfg(test)]
 mod tests {
@@ -443,18 +357,6 @@ mod tests {
             }
             _ => panic!("Should be uncorrectable with 4 errors"),
         }
-    }
-
-    #[test]
-    fn test_generator_polynomial() {
-        // Test generator polynomial for degree 7
-        let poly = get_generator_polynomial(7);
-        let expected = vec![1, 127, 122, 154, 164, 11, 68, 117]; // Known values for degree 7
-        
-        println!("Generated poly: {:02X?}", poly);
-        println!("Expected poly:  {:02X?}", expected);
-        
-        assert_eq!(poly, expected, "Generator polynomial mismatch");
     }
 
     #[test]

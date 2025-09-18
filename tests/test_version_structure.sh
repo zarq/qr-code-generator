@@ -62,9 +62,9 @@ esac
 # Generate QR code
 TEST_FILE="test_v${VERSION}_structure.png"
 if [ $VERSION -le 10 ]; then
-    ./target/debug/qr-generator --byte-mode --data "$TEST_DATA" -o "$TEST_FILE" >/dev/null 2>&1
+    ./target/debug/qr-generator -b "$TEST_DATA" -o "$TEST_FILE" >/dev/null 2>&1
 else
-    ./target/debug/qr-generator --numeric --data "$TEST_DATA" -o "$TEST_FILE" >/dev/null 2>&1
+    ./target/debug/qr-generator -n "$TEST_DATA" -o "$TEST_FILE" >/dev/null 2>&1
 fi
 
 if [ ! -f "$TEST_FILE" ]; then

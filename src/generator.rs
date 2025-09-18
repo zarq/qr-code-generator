@@ -3,11 +3,31 @@ use crate::mask::apply_mask;
 use crate::encoding::{encode_data, EncodedData};
 use crate::alignment::{is_alignment_pattern, get_alignment_positions};
 use crate::capacity::get_unencoded_capacity_in_bytes;
+use crate::pixel_mapping::get_data_ecc_positions;
 
 pub fn generate_qr_matrix(data: &str, config: &QrConfig) -> Vec<Vec<u8>> {
     let version = calculate_version(data, config.error_correction, config.data_mode);
     let size = 21 + (version as usize - 1) * 4;
     let mut matrix = vec![vec![0u8; size]; size];
+
+    let encoded = encode_data(data, version, config.error_correction, config.data_mode);
+    
+    if config.verbose {
+        println!("Original data (hex): {}", hex::encode(data.as_bytes()).chars().collect::<Vec<_>>().chunks(2).map(|chunk| chunk.iter().collect::<String>()).collect::<Vec<_>>().join(" "));
+        println!("Serialized data (hex): {}", hex::encode(&bits_to_bytes(&encoded.data_bits)).chars().collect::<Vec<_>>().chunks(2).map(|chunk| chunk.iter().collect::<String>()).collect::<Vec<_>>().join(" "));
+        println!("ECC data (hex): {}", hex::encode(&bits_to_bytes(&encoded.ecc_bits)).chars().collect::<Vec<_>>().chunks(2).map(|chunk| chunk.iter().collect::<String>()).collect::<Vec<_>>().join(" "));
+        
+        let mut full_bits = encoded.data_bits.clone();
+        full_bits.extend(&encoded.ecc_bits);
+        let bit_string: String = full_bits.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect();
+        println!("Full bit string (unmasked): {}", bit_string);
+    }
+    
+    place_data_bits(&mut matrix, &encoded, version);
+
+    if !config.skip_mask {
+        apply_mask(&mut matrix, config.mask_pattern);
+    }
 
     // Add finder patterns
     add_position_pattern(&mut matrix, 0, 0);
@@ -21,13 +41,6 @@ pub fn generate_qr_matrix(data: &str, config: &QrConfig) -> Vec<Vec<u8>> {
 
     if version >= Version::V7 {
         add_version_info(&mut matrix, version);
-    }
-
-    let encoded = encode_data(data, version, config.error_correction, config.data_mode);
-    place_data_bits(&mut matrix, &encoded, version);
-
-    if !config.skip_mask {
-        apply_mask(&mut matrix, config.mask_pattern);
     }
 
     add_format_info(&mut matrix, config.error_correction, config.mask_pattern);
@@ -121,41 +134,40 @@ fn add_timing_patterns(matrix: &mut Vec<Vec<u8>>, size: usize) {
 }
 
 fn get_format_info(error_correction: ErrorCorrection, mask_pattern: MaskPattern) -> u16 {
-    let ec_bits = match error_correction {
-        ErrorCorrection::L => 0b01,
-        ErrorCorrection::M => 0b00,
-        ErrorCorrection::Q => 0b11,
-        ErrorCorrection::H => 0b10,
-    };
-    
-    let mask_bits = match mask_pattern {
-        MaskPattern::Pattern0 => 0b000,
-        MaskPattern::Pattern1 => 0b001,
-        MaskPattern::Pattern2 => 0b010,
-        MaskPattern::Pattern3 => 0b011,
-        MaskPattern::Pattern4 => 0b100,
-        MaskPattern::Pattern5 => 0b101,
-        MaskPattern::Pattern6 => 0b110,
-        MaskPattern::Pattern7 => 0b111,
-    };
-    
-    let data = (ec_bits << 3) | mask_bits;
-    let mut format_info = (data as u16) << 10;
-    
-    // BCH(15,5) encoding with generator polynomial x^10 + x^8 + x^5 + x^4 + x^2 + x + 1
-    let generator = 0b10100110111;
-    let mut remainder = format_info;
-    
-    for _ in 0..5 {
-        if remainder & 0x4000 != 0 {
-            remainder = (remainder << 1) ^ generator;
-        } else {
-            remainder <<= 1;
-        }
+    match (error_correction, mask_pattern) {
+        (ErrorCorrection::L, MaskPattern::Pattern0) => 0b111011111000100,
+        (ErrorCorrection::L, MaskPattern::Pattern1) => 0b111001011110011,
+        (ErrorCorrection::L, MaskPattern::Pattern2) => 0b111110110101010,
+        (ErrorCorrection::L, MaskPattern::Pattern3) => 0b111100010011101,
+        (ErrorCorrection::L, MaskPattern::Pattern4) => 0b110011000101111,
+        (ErrorCorrection::L, MaskPattern::Pattern5) => 0b110001100011000,
+        (ErrorCorrection::L, MaskPattern::Pattern6) => 0b110110001000001,
+        (ErrorCorrection::L, MaskPattern::Pattern7) => 0b110100101110110,
+        (ErrorCorrection::M, MaskPattern::Pattern0) => 0b101010000010010,
+        (ErrorCorrection::M, MaskPattern::Pattern1) => 0b101000100100101,
+        (ErrorCorrection::M, MaskPattern::Pattern2) => 0b101111001111100,
+        (ErrorCorrection::M, MaskPattern::Pattern3) => 0b101101101001011,
+        (ErrorCorrection::M, MaskPattern::Pattern4) => 0b100010111111001,
+        (ErrorCorrection::M, MaskPattern::Pattern5) => 0b100000011001110,
+        (ErrorCorrection::M, MaskPattern::Pattern6) => 0b100111110010111,
+        (ErrorCorrection::M, MaskPattern::Pattern7) => 0b100101010100000,
+        (ErrorCorrection::Q, MaskPattern::Pattern0) => 0b011010101011111,
+        (ErrorCorrection::Q, MaskPattern::Pattern1) => 0b011000001101000,
+        (ErrorCorrection::Q, MaskPattern::Pattern2) => 0b011111100110001,
+        (ErrorCorrection::Q, MaskPattern::Pattern3) => 0b011101000000110,
+        (ErrorCorrection::Q, MaskPattern::Pattern4) => 0b010010010110100,
+        (ErrorCorrection::Q, MaskPattern::Pattern5) => 0b010000110000011,
+        (ErrorCorrection::Q, MaskPattern::Pattern6) => 0b010111011011010,
+        (ErrorCorrection::Q, MaskPattern::Pattern7) => 0b010101111101101,
+        (ErrorCorrection::H, MaskPattern::Pattern0) => 0b001011010001001,
+        (ErrorCorrection::H, MaskPattern::Pattern1) => 0b001001110111110,
+        (ErrorCorrection::H, MaskPattern::Pattern2) => 0b001110011100111,
+        (ErrorCorrection::H, MaskPattern::Pattern3) => 0b001100111010000,
+        (ErrorCorrection::H, MaskPattern::Pattern4) => 0b000011101100010,
+        (ErrorCorrection::H, MaskPattern::Pattern5) => 0b000001001010101,
+        (ErrorCorrection::H, MaskPattern::Pattern6) => 0b000110100001100,
+        (ErrorCorrection::H, MaskPattern::Pattern7) => 0b000100000111011,
     }
-    
-    format_info |= remainder & 0x3FF;
-    format_info ^ 0x5412 // Apply mask
 }
 
 fn add_format_info(matrix: &mut Vec<Vec<u8>>, error_correction: ErrorCorrection, mask_pattern: MaskPattern) {
@@ -163,98 +175,58 @@ fn add_format_info(matrix: &mut Vec<Vec<u8>>, error_correction: ErrorCorrection,
     let size = matrix.len();
     
     // Place format info bits around top-left finder pattern
+    // Bits 0-5: horizontal, left to right
     for i in 0..6 {
-        matrix[8][i] = ((format_info >> i) & 1) as u8;
+        matrix[8][i] = ((format_info >> (14-i)) & 1) as u8;
     }
-    matrix[8][7] = ((format_info >> 6) & 1) as u8;
+    // Skip timing pattern at (8,6)
+    // Bit 6: at (8,7)
+    matrix[8][7] = ((format_info >> 8) & 1) as u8;
+    // Bit 7: at (8,8) 
     matrix[8][8] = ((format_info >> 7) & 1) as u8;
-    matrix[7][8] = ((format_info >> 8) & 1) as u8;
+    // Bit 8: at (7,8)
+    matrix[7][8] = ((format_info >> 6) & 1) as u8;
+    // Bits 9-14: vertical, bottom to top
     for i in 0..6 {
-        matrix[5-i][8] = ((format_info >> (9+i)) & 1) as u8;
+        matrix[5-i][8] = ((format_info >> (5-i)) & 1) as u8;
     }
     
-    // Place format info bits around other finder patterns
-    for i in 0..8 {
-        matrix[size-1-i][8] = ((format_info >> i) & 1) as u8;
-    }
+    // Place format info bits around bottom-left and top-right finder patterns
+    // Bottom-left vertical (bits 14-8, reversed)
     for i in 0..7 {
-        matrix[8][size-7+i] = ((format_info >> (8+i)) & 1) as u8;
+        matrix[size-1-i][8] = ((format_info >> (14-i)) & 1) as u8;
+    }
+    // Top-right horizontal (bits 7-0, reversed)  
+    for i in 0..8 {
+        matrix[8][size-8+i] = ((format_info >> (7-i)) & 1) as u8;
     }
 }
 
 fn place_data_bits(matrix: &mut Vec<Vec<u8>>, encoded: &EncodedData, version: Version) {
-    let size = matrix.len();
-    let (data_blocks, ecc_blocks) = get_block_structure(&encoded.data_bits, &encoded.ecc_bits);
+    // Convert bits to bytes and combine data + ECC
+    let data_bytes = bits_to_bytes(&encoded.data_bits);
+    let ecc_bytes = bits_to_bytes(&encoded.ecc_bits);
     
+    let mut all_bytes = data_bytes;
+    all_bytes.extend(ecc_bytes);
+    
+    // Convert bytes back to bits for placement
     let mut all_bits = Vec::new();
-    let max_data_blocks = data_blocks.len();
-    let max_ecc_blocks = ecc_blocks.len();
-    let max_data_len = data_blocks.iter().map(|b| b.len()).max().unwrap_or(0);
-    let max_ecc_len = ecc_blocks.iter().map(|b| b.len()).max().unwrap_or(0);
-    
-    // Interleave data blocks
-    for i in 0..max_data_len {
-        for j in 0..max_data_blocks {
-            if i < data_blocks[j].len() {
-                all_bits.push(data_blocks[j][i]);
-            }
+    for byte in all_bytes {
+        for i in (0..8).rev() {
+            all_bits.push((byte >> i) & 1);
         }
     }
     
-    // Interleave ECC blocks
-    for i in 0..max_ecc_len {
-        for j in 0..max_ecc_blocks {
-            if i < ecc_blocks[j].len() {
-                all_bits.push(ecc_blocks[j][i]);
-            }
+    // Get the correct data placement positions
+    let positions = get_data_ecc_positions(version);
+    
+    // Place bits at the designated positions
+    for (bit_index, &(row, col)) in positions.iter().enumerate() {
+        if bit_index < all_bits.len() {
+            matrix[row][col] = all_bits[bit_index];
         }
     }
-    
-    let mut bit_index = 0;
-    let mut up = true;
-    let mut col = size - 1;
-    
-    while col > 0 {
-        if col == 6 { col -= 1; }
-        
-        for _ in 0..2 {
-            let mut row = if up { size - 1 } else { 0 };
-            
-            loop {
-                if !is_function_module(col, row, size, version) {
-                    if bit_index < all_bits.len() {
-                        matrix[row][col] = all_bits[bit_index];
-                        bit_index += 1;
-                    }
-                }
-                
-                if up {
-                    if row == 0 { break; }
-                    row -= 1;
-                } else {
-                    row += 1;
-                    if row >= size { break; }
-                }
-            }
-            
-            if col == 0 { break; }
-            col -= 1;
-        }
-        
-        up = !up;
-        if col == 0 { break; }
-        col -= 1;
-    }
-}
-
-fn get_block_structure(data_bits: &[u8], ecc_bits: &[u8]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
-    let data_bytes = bits_to_bytes(data_bits);
-    let ecc_bytes = bits_to_bytes(ecc_bits);
-    
-    let data_blocks = vec![data_bytes];
-    let ecc_blocks = vec![ecc_bytes];
-    
-    (data_blocks, ecc_blocks)
 }
 
 fn bits_to_bytes(bits: &[u8]) -> Vec<u8> {
@@ -345,7 +317,6 @@ fn add_alignment_patterns(matrix: &mut Vec<Vec<u8>>, version: Version) {
     }
 }
 
-fn add_dark_module(matrix: &mut Vec<Vec<u8>>, _version: Version) {
-    let size = matrix.len();
-    matrix[4 * _version as usize + 9][8] = 1;
+fn add_dark_module(matrix: &mut Vec<Vec<u8>>, version: Version) {
+    matrix[4 * version as usize + 9][8] = 1;
 }

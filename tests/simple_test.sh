@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 echo "Running simple test..."
 
 # Generate QR code
-./target/debug/qr-generator --numeric -u "123" -o tests/generated/simple.png
+./target/debug/qr-generator -n "123" -o tests/generated/simple.png
 
 # Analyze it
 ./target/debug/qr-analyzer tests/generated/simple.png > tests/generated/simple.json

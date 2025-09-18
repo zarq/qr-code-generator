@@ -91,41 +91,41 @@ check_specific_value() {
 # Run tests
 echo "=== Basic Functionality Tests ==="
 
-run_test "numeric_basic" "--numeric -d \"123456\"" "numeric mode"
-run_test "alphanumeric_basic" "--alphanumeric-mode -d \"HELLO123\"" "alphanumeric mode"  
-run_test "byte_basic" "--byte-mode -d \"Hello World\"" "byte mode"
+run_test "numeric_basic" "-n \"123456\"" "numeric mode"
+run_test "alphanumeric_basic" "-a \"HELLO123\"" "alphanumeric mode"  
+run_test "byte_basic" "-b \"Hello World\"" "byte mode"
 
 echo "=== Version Tests ==="
 
-run_test "version_v1" "--numeric -d \"123\"" "V1 generation"
-run_test "version_v3" "--byte-mode -d \"This is a longer text string to force version 3\"" "V3 generation"
+run_test "version_v1" "-n \"123\"" "V1 generation"
+run_test "version_v3" "-b \"This is a longer text string to force version 3\"" "V3 generation"
 
 echo "=== Error Correction Tests ==="
 
-run_test "ecc_l" "--numeric -d \"12345\" -l L" "ECC level L"
-run_test "ecc_m" "--numeric -d \"12345\" -l M" "ECC level M"
+run_test "ecc_l" "-n \"12345\" -e L" "ECC level L"
+run_test "ecc_m" "-n \"12345\" -e M" "ECC level M"
 
 echo "=== Mask Pattern Tests ==="
 
-run_test "mask_0" "--numeric -d \"123456\" --mask-pattern 0" "mask pattern 0"
-run_test "mask_7" "--numeric -d \"123456\" --mask-pattern 7" "mask pattern 7"
-run_test "skip_mask" "--numeric -d \"123456\" --skip-mask" "skip mask"
+run_test "mask_0" "-n \"123456\" -m 0" "mask pattern 0"
+run_test "mask_7" "-n \"123456\" -m 7" "mask pattern 7"
+run_test "skip_mask" "-n \"123456\" -s" "skip mask"
 
 echo "=== Error Correction Validation Tests ==="
 
 # Test that different ECC levels produce different format info
-run_test "ecc_l_validation" "--numeric -d \"12345\" -l L" "ECC L validation"
-run_test "ecc_m_validation" "--numeric -d \"12345\" -l M" "ECC M validation"
-run_test "ecc_q_validation" "--numeric -d \"12345\" -l Q" "ECC Q validation"
-run_test "ecc_h_validation" "--numeric -d \"12345\" -l H" "ECC H validation"
+run_test "ecc_l_validation" "-n \"12345\" -e L" "ECC L validation"
+run_test "ecc_m_validation" "-n \"12345\" -e M" "ECC M validation"
+run_test "ecc_q_validation" "-n \"12345\" -e Q" "ECC Q validation"
+run_test "ecc_h_validation" "-n \"12345\" -e H" "ECC H validation"
 
 echo "=== Mask Pattern Validation Tests ==="
 
 # Test that different mask patterns produce different format info
-run_test "mask_validation_0" "--numeric -d \"123456\" --mask-pattern 0" "mask 0 validation"
-run_test "mask_validation_1" "--numeric -d \"123456\" --mask-pattern 1" "mask 1 validation"
-run_test "mask_validation_2" "--numeric -d \"123456\" --mask-pattern 2" "mask 2 validation"
-run_test "mask_validation_3" "--numeric -d \"123456\" --mask-pattern 3" "mask 3 validation"
+run_test "mask_validation_0" "-n \"123456\" -m 0" "mask 0 validation"
+run_test "mask_validation_1" "-n \"123456\" -m 1" "mask 1 validation"
+run_test "mask_validation_2" "-n \"123456\" -m 2" "mask 2 validation"
+run_test "mask_validation_3" "-n \"123456\" -m 3" "mask 3 validation"
 
 # Verify specific values are correctly set
 echo "=== Specific Value Verification ==="
@@ -159,10 +159,10 @@ TESTS_RUN=$((TESTS_RUN + 1))
 echo "=== Data Extraction Validation Tests ==="
 
 # Test that generated data matches extracted data
-run_test "data_extract_numeric" "--numeric -d \"42\" -o tests/generated/data_extract_numeric.png" "numeric data extraction"
-run_test "data_extract_byte" "--byte-mode -d \"Test123\" -o tests/generated/data_extract_byte.png" "byte data extraction"
-run_test "data_extract_long" "--numeric -d \"9876543210\" -o tests/generated/data_extract_long.png" "long numeric extraction"
-run_test "data_extract_maintainable" "--byte-mode -d \"Maintainable Code!\" -o tests/generated/data_extract_maintainable.png" "maintainable code extraction"
+run_test "data_extract_numeric" "-n \"42\" -o tests/generated/data_extract_numeric.png" "numeric data extraction"
+run_test "data_extract_byte" "-b \"Test123\" -o tests/generated/data_extract_byte.png" "byte data extraction"
+run_test "data_extract_long" "-n \"9876543210\" -o tests/generated/data_extract_long.png" "long numeric extraction"
+run_test "data_extract_maintainable" "-b \"Maintainable Code!\" -o tests/generated/data_extract_maintainable.png" "maintainable code extraction"
 
 echo "=== Data Content Verification ==="
 
@@ -208,10 +208,10 @@ TESTS_RUN=$((TESTS_RUN + 1))
 
 echo "=== Numeric Encoding Tests ==="
 
-run_test "numeric_single" "--numeric -d \"7\"" "single digit"
-run_test "numeric_double" "--numeric -d \"42\"" "two digits"
-run_test "numeric_triple" "--numeric -d \"789\"" "three digits"
-run_test "numeric_long" "--numeric -d \"1234567890\"" "long numeric"
+run_test "numeric_single" "-n \"7\"" "single digit"
+run_test "numeric_double" "-n \"42\"" "two digits"
+run_test "numeric_triple" "-n \"789\"" "three digits"
+run_test "numeric_long" "-n \"1234567890\"" "long numeric"
 
 # Summary
 echo ""
