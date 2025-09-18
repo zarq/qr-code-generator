@@ -1162,18 +1162,6 @@ fn decode_format_bits(bits: u16) -> Option<(ErrorCorrection, u8)> {
     Some((error_correction, mask_pattern))
 }
 
-fn bch_syndrome(codeword: u16) -> u16 {
-    let mut syndrome = codeword;
-    for _ in 0..5 {
-        if syndrome & 0x4000 != 0 {
-            syndrome = (syndrome << 1) ^ 0x537;
-        } else {
-            syndrome <<= 1;
-        }
-    }
-    syndrome & 0x3FF
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
