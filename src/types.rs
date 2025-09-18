@@ -62,6 +62,22 @@ pub enum MaskPattern {
     Pattern4, Pattern5, Pattern6, Pattern7,
 }
 
+impl MaskPattern {
+    pub fn from_index(index: u8) -> MaskPattern {
+        match index {
+            0 => MaskPattern::Pattern0,
+            1 => MaskPattern::Pattern1,
+            2 => MaskPattern::Pattern2,
+            3 => MaskPattern::Pattern3,
+            4 => MaskPattern::Pattern4,
+            5 => MaskPattern::Pattern5,
+            6 => MaskPattern::Pattern6,
+            7 => MaskPattern::Pattern7,
+            _ => MaskPattern::Pattern0, // Default fallback
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
 pub enum OutputFormat {

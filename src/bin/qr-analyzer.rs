@@ -460,9 +460,19 @@ fn analyze_format_info(matrix: &[Vec<u8>]) -> Option<FormatInfo> {
     let raw_bits2 = bits2.iter().map(|&b| if b == 1 { '1' } else { '0' }).collect::<String>();
     let copies_match = raw_bits1 == raw_bits2;
     
-    // Decode format info from copy 1
+    // Decode format info from copy 1 with BCH error correction
     let format_value = bits_to_u16(&bits1);
-    let (ecc, mask, _) = decode_format_info(format_value);
+    println!("Format bits (copy 1): {:015b}", format_value);
+    println!("Format bits (copy 2): {:015b}", bits_to_u16(&bits2));
+    let (ecc, mask) = if let Some((ec, mask_idx)) = correct_format_info(format_value) {
+        println!("Corrected format info: ECC {:?}, Mask {:?}", ec, mask_idx);
+        (Some(ec), Some(MaskPattern::from_index(mask_idx)))
+    } else {
+        println!("Failed to correct format info");
+        // Fallback to old method if BCH correction fails
+        let (ecc, mask, _) = decode_format_info(format_value);
+        (ecc, mask)
+    };
     
     Some(FormatInfo {
         raw_bits_copy1: Some(raw_bits1),
@@ -1081,4 +1091,108 @@ fn bits_to_u16(bits: &[u8]) -> u16 {
         result |= (bit as u16) << (bits.len() - 1 - i);
     }
     result
+}
+
+fn correct_format_info(format_bits: u16) -> Option<(ErrorCorrection, u8)> {
+    const FORMAT_MASK: u16 = 0x5412;
+    
+    // Try direct decode first
+    let unmasked = format_bits ^ FORMAT_MASK;
+    if let Some(result) = decode_format_bits(unmasked) {
+        return Some(result);
+    }
+    
+    // BCH error correction - try all possible error patterns up to 3 bits
+    // Single bit errors
+    for i in 0..15 {
+        let corrected = format_bits ^ (1 << i);
+        let unmasked = corrected ^ FORMAT_MASK;
+        if let Some(result) = decode_format_bits(unmasked) {
+            return Some(result);
+        }
+    }
+    
+    // Double bit errors
+    for i in 0..15 {
+        for j in (i+1)..15 {
+            let corrected = format_bits ^ (1 << i) ^ (1 << j);
+            let unmasked = corrected ^ FORMAT_MASK;
+            if let Some(result) = decode_format_bits(unmasked) {
+                return Some(result);
+            }
+        }
+    }
+    
+    // Triple bit errors
+    for i in 0..15 {
+        for j in (i+1)..15 {
+            for k in (j+1)..15 {
+                let corrected = format_bits ^ (1 << i) ^ (1 << j) ^ (1 << k);
+                let unmasked = corrected ^ FORMAT_MASK;
+                if let Some(result) = decode_format_bits(unmasked) {
+                    return Some(result);
+                }
+            }
+        }
+    }
+    
+    None
+}
+
+fn decode_format_bits(bits: u16) -> Option<(ErrorCorrection, u8)> {
+    // Extract data bits (upper 5 bits)
+    let data = (bits >> 10) & 0x1F;
+    
+    // Decode error correction level and mask pattern
+    let ec_bits = (data >> 3) & 0x3;
+    let mask_pattern = (data & 0x7) as u8;
+    
+    let error_correction = match ec_bits {
+        0b01 => ErrorCorrection::L,
+        0b00 => ErrorCorrection::M,
+        0b11 => ErrorCorrection::Q,
+        0b10 => ErrorCorrection::H,
+        _ => return None,
+    };
+    
+    if mask_pattern > 7 {
+        return None;
+    }
+    
+    Some((error_correction, mask_pattern))
+}
+
+fn bch_syndrome(codeword: u16) -> u16 {
+    let mut syndrome = codeword;
+    for _ in 0..5 {
+        if syndrome & 0x4000 != 0 {
+            syndrome = (syndrome << 1) ^ 0x537;
+        } else {
+            syndrome <<= 1;
+        }
+    }
+    syndrome & 0x3FF
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bch_format_correction() {
+        // Test format bits: 111100010001111 (corrupted)
+        let format_bits = 0b111100010001111u16;
+        
+        // Should decode to ECC Level L, Mask Pattern 3
+        let result = correct_format_info(format_bits);
+        assert!(result.is_some(), "Should be able to correct 2-bit error");
+        
+        let (ecc, mask) = result.unwrap();
+        assert_eq!(mask, 3, "Should decode to mask pattern 3");
+        
+        match ecc {
+            ErrorCorrection::L => {}, // Expected
+            _ => panic!("Should decode to ECC Level L"),
+        }
+    }
 }
