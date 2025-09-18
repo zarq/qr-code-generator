@@ -5,3 +5,4 @@ pub mod alignment;
 pub mod mask;
 pub mod encoding;
 pub mod ecc;
+pub mod generator;

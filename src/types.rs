@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, serde::Serialize)]
 #[allow(dead_code)]
 pub enum Version {
     V1 = 1, V2, V3, V4, V5, V6, V7, V8, V9, V10,
