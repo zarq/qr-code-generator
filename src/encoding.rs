@@ -151,6 +151,7 @@ fn encode_alphanumeric(data: &str, _version: Version) -> Vec<u8> {
 fn alphanumeric_value(c: char) -> u16 {
     match c {
         '0'..='9' => (c as u16) - ('0' as u16),
+        'a'..='z' => (c as u16) - ('a' as u16) + 10, // These are also encoded as upper case letters, for convenience
         'A'..='Z' => (c as u16) - ('A' as u16) + 10,
         ' ' => 36, '$' => 37, '%' => 38, '*' => 39, '+' => 40,
         '-' => 41, '.' => 42, '/' => 43, ':' => 44,
